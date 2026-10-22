@@ -1,0 +1,12 @@
+{
+    "name": "macbook/web",
+    "authors": [
+        {
+            "name": "med",
+            "email": "test@test.com"
+        }
+    ],
+    "require": {
+        "fzaninotto/faker": "^1.7"
+    }
+}
