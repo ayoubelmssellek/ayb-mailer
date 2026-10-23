@@ -7,6 +7,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+require_once __DIR__.DIRECTORY_SEPARATOR.'brevo_status.php';
 
 if($_SERVER['REQUEST_METHOD'] !== 'POST')
 {
@@ -146,7 +147,7 @@ function brevo_fetch_email_credits($apiKey)
 $parsed = array();
 if(!empty($in['key']))
 {
-	$parsed[] = array('limit' => 300, 'key' => trim((string)$in['key']), 'from' => '', 'name' => '');
+	$parsed[] = array('limit' => 300, 'key' => trim((string)$in['key']), 'from' => isset($in['from']) ? trim((string)$in['from']) : '', 'name' => '');
 }
 else if(!empty($in['keys']) && is_array($in['keys']))
 {
@@ -173,11 +174,11 @@ $accounts = array();
 $total = 0;
 foreach($parsed as $i => $acc)
 {
-	$row = brevo_fetch_email_credits($acc['key']);
+	$row = brevo_account_health($acc['key'], isset($acc['from']) ? $acc['from'] : '');
 	$row['index'] = $i + 1;
 	$row['limit'] = isset($acc['limit']) ? intval($acc['limit']) : 300;
 	$row['from'] = isset($acc['from']) ? $acc['from'] : '';
-	if($row['ok'] && $row['credits'] !== null) $total += floatval($row['credits']);
+	if($row['ok'] && $row['credits'] !== null && empty($row['blocking'])) $total += floatval($row['credits']);
 	$accounts[] = $row;
 }
 

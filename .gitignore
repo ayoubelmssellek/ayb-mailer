@@ -11,6 +11,7 @@
 /failed_emails.txt
 /send_queue_lane.txt
 /dash_live_state.json
+/smtp_daily.json
 /active_campaign.txt
 /stop_send.flag
 /send_running.flag

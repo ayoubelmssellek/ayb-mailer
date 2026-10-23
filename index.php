@@ -3,6 +3,7 @@
 set_time_limit(0);
 // Require autoload
 require_once 'vendor/autoload.php';
+require_once __DIR__.DIRECTORY_SEPARATOR.'brevo_status.php';
 // init faker 
 $faker = Faker\Factory::create('fr_FR');
 //INIT VARS
@@ -354,8 +355,11 @@ body.send-mode{margin:0;background:var(--bg);color:var(--text);font-family:"DM S
 .send-dash .api-credits .api-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
 .send-dash .api-credits .api-row.on{border-color:var(--ok);box-shadow:0 0 0 1px rgba(46,229,157,.25)}
 .send-dash .api-credits .api-row.dead{opacity:.55}
+.send-dash .api-credits .api-row.bad{border-color:#c0392b;opacity:1}
 .send-dash .api-credits .api-row b{font-variant-numeric:tabular-nums;color:#fff}
 .send-dash .api-credits .api-row .muted{color:var(--muted);font-size:11px}
+.send-dash .api-credits .api-row .st{margin-top:4px;font-size:11px;font-weight:700;color:#ffc14d;line-height:1.35}
+.send-dash .api-credits .api-row.bad .st{color:#ff8b95}
 .send-dash .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--warn)}
 .send-dash .dot.on{background:var(--ok)}
 .send-dash .dot.off{background:var(--fail)}
@@ -845,14 +849,17 @@ document.addEventListener('DOMContentLoaded', function(){
       var line=lines[i].replace(/^\s+|\s+$/g,'');
       if(!line) continue;
       var m=line.match(/^#\s*ACCOUNT\s+(\d+)/i);
-      if(m){ flush(); cur={limit:Math.max(1,parseInt(m[1],10)||300), key:'', from:''}; continue; }
+      if(m){ flush(); cur={limit:Math.max(1,parseInt(m[1],10)||300), key:'', from:'', problem:false}; continue; }
       if(line.charAt(0)==='#') continue;
       var fm=line.match(/^from\s*[:=]\s*(.+)$/i);
-      if(fm){ if(!cur) cur={limit:300,key:'',from:''}; cur.from=fm[1].replace(/^\s+|\s+$/g,''); continue; }
-      if(/^name\s*[:=]/i.test(line)) continue;
+      if(fm){ if(!cur) cur={limit:300,key:'',from:'',problem:false}; cur.from=fm[1].replace(/^\s+|\s+$/g,''); continue; }
+      var pm=line.match(/^problem\s*[:=]\s*(.+)$/i);
+      if(pm){ if(!cur) cur={limit:300,key:'',from:'',problem:false}; cur.problem=/^(1|yes|true|on)$/i.test(pm[1].replace(/^\s+|\s+$/g,'')); continue; }
+      var nm=line.match(/^name\s*[:=]\s*(.*)$/i);
+      if(nm){ if(!cur) cur={limit:300,key:'',from:'',problem:false,name:''}; cur.name=nm[1].replace(/^\s+|\s+$/g,''); continue; }
       if(/^xkeysib-/i.test(line) || (line.length>40 && line.indexOf(' ')<0 && line.indexOf('@')<0)){
-        if(!cur) cur={limit:300,key:'',from:''};
-        if(cur.key){ flush(); cur={limit:300,key:'',from:''}; }
+        if(!cur) cur={limit:300,key:'',from:'',problem:false};
+        if(cur.key){ flush(); cur={limit:300,key:'',from:'',problem:false}; }
         cur.key=line;
       }
     }
@@ -865,6 +872,8 @@ document.addEventListener('DOMContentLoaded', function(){
       var lim=a.limit||300;
       var block='#ACCOUNT '+lim+'\n'+(a.key||'');
       if(a.from) block+='\nfrom: '+a.from;
+      if(a.name) block+='\nname: '+a.name;
+      if(a.problem) block+='\nproblem: 1';
       chunks.push(block);
     });
     return chunks.join('\n\n');
@@ -878,19 +887,19 @@ document.addEventListener('DOMContentLoaded', function(){
     var ta=document.getElementById('brevo_api_keys');
     var locals=brevoParseLocalAccounts(ta ? ta.value : '');
     return locals.map(function(a,i){
-      var o={index:i+1, limit:a.limit, from:a.from, key:a.key, key_preview:(a.key||'').slice(0,14)+'…'};
+      var o={index:i+1, limit:a.limit, from:a.from, key:a.key, problem:!!a.problem, key_preview:(a.key||'').slice(0,14)+'…'};
       var prev=window.__brevoCreditState && window.__brevoCreditState[i];
-      if(prev && prev.key_preview===(a.key||'').slice(0,14)+'…'){
-        o.ok=prev.ok; o.credits=prev.credits; o.plan_type=prev.plan_type; o.end_date=prev.end_date; o.email=prev.email; o.err=prev.err; o.key_preview=prev.key_preview||o.key_preview;
-      } else if(prev && prev._key===a.key){
-        o.ok=prev.ok; o.credits=prev.credits; o.plan_type=prev.plan_type; o.end_date=prev.end_date; o.email=prev.email; o.err=prev.err;
+      if(prev && prev._key && prev._key===a.key){
+        o.ok=prev.ok; o.credits=prev.credits; o.plan_type=prev.plan_type; o.end_date=prev.end_date; o.email=prev.email; o.err=prev.err; o.key_preview=prev.key_preview||o.key_preview; o.status_text=prev.status_text||''; o.blocking=!!prev.blocking;
+      } else if(prev && !prev._key && prev.key_preview===(a.key||'').slice(0,14)+'…'){
+        o.ok=prev.ok; o.credits=prev.credits; o.plan_type=prev.plan_type; o.end_date=prev.end_date; o.email=prev.email; o.err=prev.err; o.key_preview=prev.key_preview||o.key_preview; o.status_text=prev.status_text||''; o.blocking=!!prev.blocking;
       }
       return o;
     });
   }
   function brevoSaveCreditState(rows){
     window.__brevoCreditState=(rows||[]).map(function(x){
-      return {ok:x.ok,credits:x.credits,plan_type:x.plan_type,end_date:x.end_date,email:x.email,err:x.err,key_preview:x.key_preview,_key:x.key};
+      return {ok:x.ok,credits:x.credits,plan_type:x.plan_type,end_date:x.end_date,email:x.email,err:x.err,key_preview:x.key_preview,status_text:x.status_text||'',blocking:!!x.blocking,_key:x.key};
     });
   }
   function brevoRenderCreditCards(list, totalOverride){
@@ -907,7 +916,7 @@ document.addEventListener('DOMContentLoaded', function(){
     (list||[]).forEach(function(a, idx){
       var n=a.index|| (idx+1);
       var card=document.createElement('div');
-      card.style.cssText='background:var(--s-input);border:1px solid var(--s-line);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap';
+      card.style.cssText='background:var(--s-input);border:1px solid '+(a.problem||a.blocking?'#c0392b':'var(--s-line)')+';border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap';
       var left=document.createElement('div');
       left.style.flex='1';
       var status='Not checked yet';
@@ -917,28 +926,34 @@ document.addEventListener('DOMContentLoaded', function(){
         status='<b style="color:var(--s-ok);font-size:16px">'+leftN+' left</b> on Brevo';
         if(a.plan_type) status+=' <span style="color:var(--s-muted)">('+a.plan_type+')</span>';
         if(a.end_date) status+=' <span style="color:var(--s-muted)">until '+String(a.end_date).slice(0,10)+'</span>';
-      } else if(a.err){
-        status='<span style="color:#c0392b">'+a.err+'</span>';
+      } else if(a.err && !a.status_text){
+        status='<span style="color:#c0392b">'+brevoEsc(a.err)+'</span>';
       } else if(a.pending){
         status='Checking…';
       }
+      if(a.problem) status+='<div style="margin-top:4px;color:#c0392b;font-weight:700">Marked problem — send skips this account</div>';
+      if(a.status_text) status+='<div style="margin-top:4px;color:'+(a.blocking?'#c0392b':'#9a6b2f')+';font-weight:600">'+brevoEsc(a.status_text)+(a.blocking?' — send skips this account':'')+'</div>';
       left.innerHTML='<div style="font-weight:600;margin-bottom:4px">Account '+n+(a.limit?' · limit '+a.limit+'/day':'')+'</div>'
-        +'<div style="font-size:13px;margin-bottom:6px">From: <b>'+((a.from||a.email||'(none)').replace(/</g,'&lt;'))+'</b></div>'
+        +'<div style="font-size:13px;margin-bottom:6px">From: <b>'+brevoEsc(a.from||a.email||'(none)')+'</b></div>'
         +'<div style="font-size:13px">'+status+'</div>'
         +'<div style="font-size:11px;color:var(--s-muted);margin-top:2px">'+(a.key_preview||'')+'</div>';
       var actions=document.createElement('div');
       actions.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
       var btn=document.createElement('button');
       btn.type='button'; btn.className='btn btn-ghost'; btn.textContent='Check';
-      btn.onclick=function(){ brevoCheckOne(a.key, n); };
+      btn.onclick=function(){ brevoCheckOne(a.key, n, a.from); };
       var btnEdit=document.createElement('button');
-      btnEdit.type='button'; btnEdit.className='btn btn-ghost'; btnEdit.textContent='Edit From';
-      btnEdit.onclick=function(){ brevoEditFrom(n-1); };
+      btnEdit.type='button'; btnEdit.className='btn btn-ghost'; btnEdit.textContent='Edit';
+      btnEdit.onclick=function(){ brevoStartEdit(n-1); };
+      var btnProb=document.createElement('button');
+      btnProb.type='button'; btnProb.className='btn btn-ghost'; btnProb.textContent=a.problem?'Use again':'Mark problem';
+      btnProb.onclick=function(){ brevoToggleProblem(n-1); };
       var btnRm=document.createElement('button');
       btnRm.type='button'; btnRm.className='btn btn-ghost'; btnRm.textContent='Remove';
       btnRm.onclick=function(){ brevoRemoveAccount(n-1); };
       actions.appendChild(btn);
       actions.appendChild(btnEdit);
+      actions.appendChild(btnProb);
       actions.appendChild(btnRm);
       card.appendChild(left);
       card.appendChild(actions);
@@ -950,6 +965,15 @@ document.addEventListener('DOMContentLoaded', function(){
       else totEl.textContent='Total left today (all accounts): —';
     }
   }
+  function brevoEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function brevoToggleProblem(idx){
+    var ta=document.getElementById('brevo_api_keys');
+    var locals=brevoParseLocalAccounts(ta ? ta.value : '');
+    if(idx<0 || idx>=locals.length) return;
+    locals[idx].problem=!locals[idx].problem;
+    brevoSyncTextarea(locals);
+    brevoRenderCreditCards(brevoGetAccountsMerged());
+  }
   function brevoRemoveAccount(idx){
     var ta=document.getElementById('brevo_api_keys');
     var locals=brevoParseLocalAccounts(ta ? ta.value : '');
@@ -959,18 +983,31 @@ document.addEventListener('DOMContentLoaded', function(){
     brevoSyncTextarea(locals);
     brevoRenderCreditCards(brevoGetAccountsMerged());
   }
-  function brevoEditFrom(idx){
+  function brevoCancelEdit(){
+    window.__brevoKeyEdit=null;
+    var btnAdd=document.getElementById('btn-brevo-add');
+    if(btnAdd) btnAdd.textContent='Add account';
+    var keyEl=document.getElementById('brevo_add_key');
+    if(keyEl){ keyEl.type='password'; keyEl.value=''; }
+    var note=document.getElementById('brevo-key-edit-note');
+    if(note) note.textContent='';
+  }
+  function brevoStartEdit(idx){
     var ta=document.getElementById('brevo_api_keys');
     var locals=brevoParseLocalAccounts(ta ? ta.value : '');
-    if(idx<0 || idx>=locals.length) return;
-    var cur=locals[idx].from||'';
-    var next=window.prompt('From email for account '+(idx+1)+' (must be verified in Brevo):', cur);
-    if(next===null) return;
-    next=String(next).replace(/^\s+|\s+$/g,'');
-    if(!next || next.indexOf('@')<0){ alert('Enter a valid From email'); return; }
-    locals[idx].from=next;
-    brevoSyncTextarea(locals);
-    brevoRenderCreditCards(brevoGetAccountsMerged());
+    var acc=locals[idx];
+    if(!acc) return;
+    window.__brevoKeyEdit=idx;
+    var btnAdd=document.getElementById('btn-brevo-add');
+    if(btnAdd) btnAdd.textContent='Save';
+    var keyEl=document.getElementById('brevo_add_key');
+    if(keyEl){ keyEl.type='text'; keyEl.value=acc.key||''; keyEl.focus(); }
+    var fromEl=document.getElementById('brevo_add_from');
+    if(fromEl) fromEl.value=acc.from||'';
+    var limEl=document.getElementById('brevo_add_limit');
+    if(limEl) limEl.value=String(acc.limit||300);
+    var note=document.getElementById('brevo-key-edit-note');
+    if(note) note.textContent='Editing account '+(idx+1)+'. The current key and From email are in the boxes. Change what you need, then Save.';
   }
   function brevoAddAccount(){
     var keyEl=document.getElementById('brevo_add_key');
@@ -980,6 +1017,25 @@ document.addEventListener('DOMContentLoaded', function(){
     var from=(fromEl && fromEl.value || '').replace(/^\s+|\s+$/g,'');
     var limit=limEl ? (parseInt(limEl.value,10)||300) : 300;
     if(!key){ alert('Paste the Brevo API key (xkeysib-…)'); return; }
+    var taEdit=document.getElementById('brevo_api_keys');
+    var localsEdit=brevoParseLocalAccounts(taEdit ? taEdit.value : '');
+    if(typeof window.__brevoKeyEdit==='number'){
+      var idx=window.__brevoKeyEdit;
+      if(idx<0 || idx>=localsEdit.length){ brevoCancelEdit(); return; }
+      if(!from || from.indexOf('@')<0){ alert('Enter a valid From email'); return; }
+      var keyChanged=localsEdit[idx].key!==key;
+      var fromChanged=(localsEdit[idx].from||'')!==from;
+      localsEdit[idx].key=key;
+      localsEdit[idx].from=from;
+      if(limEl && String(limEl.value).replace(/^\s+|\s+$/g,'')!=='') localsEdit[idx].limit=limit;
+      if((keyChanged || fromChanged) && window.__brevoCreditState) window.__brevoCreditState[idx]=null;
+      brevoSyncTextarea(localsEdit);
+      if(fromEl) fromEl.value='';
+      if(limEl) limEl.value='300';
+      brevoCancelEdit();
+      brevoRenderCreditCards(brevoGetAccountsMerged());
+      return;
+    }
     if(!from || from.indexOf('@')<0){ alert('Enter the From email for this account (verified in Brevo)'); return; }
     var ta=document.getElementById('brevo_api_keys');
     var locals=brevoParseLocalAccounts(ta ? ta.value : '');
@@ -990,25 +1046,25 @@ document.addEventListener('DOMContentLoaded', function(){
     if(limEl) limEl.value='300';
     brevoRenderCreditCards(brevoGetAccountsMerged());
   }
-  function brevoCheckOne(key, index){
+  function brevoCheckOne(key, index, from){
     if(!key){ alert('No API key for this account'); return; }
     fetch('brevo_credits.php',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({key:key}),
+      body:JSON.stringify({key:key, from:from||''}),
       cache:'no-store'
     }).then(function(r){return r.json();}).then(function(d){
       var row=(d && d.accounts && d.accounts[0]) ? d.accounts[0] : null;
       if(!row){ alert((d && d.err) || 'Check failed'); return; }
       var merged=brevoGetAccountsMerged().map(function(a,i){
         if(i+1===index){
-          a.ok=row.ok; a.credits=row.credits; a.plan_type=row.plan_type; a.end_date=row.end_date; a.email=row.email; a.err=row.err; a.key_preview=row.key_preview;
+          a.ok=row.ok; a.credits=row.credits; a.plan_type=row.plan_type; a.end_date=row.end_date; a.email=row.email; a.err=row.err; a.key_preview=row.key_preview; a.status_text=row.status_text||''; a.blocking=!!row.blocking;
         }
         return a;
       });
       brevoSaveCreditState(merged);
       var sum=0, n=0;
-      merged.forEach(function(x){ if(x.ok){ sum+=Math.floor(x.credits||0); n++; } });
+      merged.forEach(function(x){ if(x.ok && !x.blocking){ sum+=Math.floor(x.credits||0); n++; } });
       brevoRenderCreditCards(merged, n>0 ? sum : undefined);
     }).catch(function(){ alert('Request failed'); });
   }
@@ -1019,7 +1075,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var totEl=document.getElementById('brevo-credits-total');
     var locals=brevoParseLocalAccounts(text);
     if(!locals.length){ if(totEl) totEl.textContent='Add accounts first'; return; }
-    brevoRenderCreditCards(locals.map(function(a,i){ return {index:i+1,limit:a.limit,from:a.from,key:a.key,key_preview:(a.key||'').slice(0,14)+'…',pending:true}; }));
+    brevoRenderCreditCards(locals.map(function(a,i){ return {index:i+1,limit:a.limit,from:a.from,key:a.key,problem:!!a.problem,key_preview:(a.key||'').slice(0,14)+'…',pending:true}; }));
     if(btnCred){ btnCred.disabled=true; btnCred.textContent='Checking…'; }
     fetch('brevo_credits.php',{
       method:'POST',
@@ -1039,8 +1095,9 @@ document.addEventListener('DOMContentLoaded', function(){
           limit:a.limit||loc.limit||300,
           from:a.from||loc.from||'',
           key:loc.key||'',
+          problem:!!loc.problem,
           key_preview:a.key_preview,
-          ok:a.ok, credits:a.credits, plan_type:a.plan_type, end_date:a.end_date, email:a.email, err:a.err
+          ok:a.ok, credits:a.credits, plan_type:a.plan_type, end_date:a.end_date, email:a.email, err:a.err, status_text:a.status_text||'', blocking:!!a.blocking
         };
       });
       brevoSaveCreditState(rows);
@@ -1496,9 +1553,10 @@ document.addEventListener('DOMContentLoaded', function(){
         <button type="button" id="btn-brevo-credits" class="btn btn-ghost">Check all left</button>
         <span id="brevo-credits-total" style="font-weight:700;font-size:15px;color:var(--s-ok)">Total left today: —</span>
       </div>
+      <div id="brevo-key-edit-note" class="hint" style="margin:0 0 8px"></div>
       <textarea name="brevo_api_keys" id="brevo_api_keys" rows="2" style="display:none"><?php echo htmlspecialchars($brevo_api_keys); ?></textarea>
       <div id="brevo-credits-cards" style="display:grid;gap:8px"></div>
-      <div class="hint">Add one account at a time (API key + From email). Stats live under <b>Analytics</b>.</div>
+      <div class="hint">Check reads Brevo: credits, under review, sender, and domain. Under review and Mark problem both skip that account on Send.</div>
     </div>
 
     <div class="mode-only-normal" style="<?php if($smtp_mode==='brevo'||$smtp_mode==='brevo_api') echo 'display:none'; ?>">
@@ -1531,7 +1589,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <span>/ SMTP / day</span>
             <button type="button" name="reset" id="reset" class="btn btn-ghost">Reset list</button>
           </div>
-          <div class="hint">Round-robin across Active SMTP list.</div>
+          <div class="hint">You set how many mails each account can send today. That number is remembered until tomorrow. A blocked account is skipped and that mail tries the next account.</div>
         </div>
       </div>
     </div>
@@ -8371,31 +8429,37 @@ function parse_brevo_api_blocks($text)
 		if(preg_match('/^#\s*ACCOUNT\s+(\d+)/i', $line, $m))
 		{
 			$flush();
-			$cur = array('limit' => max(1, intval($m[1])), 'key' => '', 'from' => '', 'name' => '');
+			$cur = array('limit' => max(1, intval($m[1])), 'key' => '', 'from' => '', 'name' => '', 'problem' => false);
 			continue;
 		}
 		if($line[0] === '#') continue;
 		if(preg_match('/^from\s*[:=]\s*(.+)$/i', $line, $m))
 		{
-			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '');
+			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '', 'problem' => false);
 			$cur['from'] = trim($m[1]);
 			continue;
 		}
 		if(preg_match('/^name\s*[:=]\s*(.+)$/i', $line, $m))
 		{
-			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '');
+			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '', 'problem' => false);
 			$cur['name'] = trim($m[1]);
+			continue;
+		}
+		if(preg_match('/^problem\s*[:=]\s*(1|yes|true|on)\s*$/i', $line))
+		{
+			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '', 'problem' => false);
+			$cur['problem'] = true;
 			continue;
 		}
 		// API key line (xkeysib-… or any long token)
 		if(preg_match('/^xkeysib-/i', $line) || (strlen($line) > 40 && strpos($line, ' ') === false && strpos($line, '@') === false))
 		{
-			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '');
+			if($cur === null) $cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '', 'problem' => false);
 			// New bare key without #ACCOUNT after a filled account → start next at 300
 			if($cur['key'] !== '')
 			{
 				$flush();
-				$cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '');
+				$cur = array('limit' => 300, 'key' => '', 'from' => '', 'name' => '', 'problem' => false);
 			}
 			$cur['key'] = $line;
 			continue;
@@ -8423,42 +8487,13 @@ function brevo_api_room_left($id)
 	return $mailerLeft;
 }
 
-function dash_live_state_write($extra = array())
+function brevo_api_dash_rows()
 {
-	global $brevo_api_accounts, $brevo_api_sent, $brevo_api_credits, $brevo_api_exhausted, $brevo_api_cur, $smtp_mode, $mail_queue_campaign;
+	global $brevo_api_accounts, $brevo_api_sent, $brevo_api_credits, $brevo_api_exhausted, $brevo_api_status, $brevo_api_skip;
 	$rows = array();
-	if(isset($smtp_mode) && $smtp_mode === 'brevo_api' && !empty($brevo_api_accounts))
-	{
-		foreach($brevo_api_accounts as $id => $acc)
-		{
-			$left = null;
-			if(isset($brevo_api_credits[$id]) && $brevo_api_credits[$id] !== null)
-				$left = intval(floor($brevo_api_credits[$id]));
-			if(!empty($brevo_api_exhausted[$id])) $left = 0;
-			$rows[] = array(
-				'id' => intval($id),
-				'from' => !empty($acc['from']) ? $acc['from'] : '',
-				'lim' => isset($acc['limit']) ? intval($acc['limit']) : 300,
-				'left' => $left,
-				'used' => isset($brevo_api_sent[$id]) ? intval($brevo_api_sent[$id]) : 0,
-				'exhausted' => !empty($brevo_api_exhausted[$id])
-			);
-		}
-	}
-	$row = array_merge(array(
-		'updated_at' => date('c'),
-		'mode' => isset($smtp_mode) ? $smtp_mode : '',
-		'campaign' => !empty($mail_queue_campaign),
-		'api_accounts' => $rows,
-		'api_active' => isset($brevo_api_cur) ? intval($brevo_api_cur) : -1
-	), $extra);
-	@file_put_contents(__DIR__.DIRECTORY_SEPARATOR.'dash_live_state.json', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-}
-
-function brevo_api_dash_snapshot()
-{
-	global $brevo_api_accounts, $brevo_api_sent, $brevo_api_credits, $brevo_api_exhausted, $brevo_api_cur;
-	$rows = array();
+	if(empty($brevo_api_accounts)) return $rows;
+	$statusMap = (isset($brevo_api_status) && is_array($brevo_api_status)) ? $brevo_api_status : array();
+	$skipMap = (isset($brevo_api_skip) && is_array($brevo_api_skip)) ? $brevo_api_skip : array();
 	foreach($brevo_api_accounts as $id => $acc)
 	{
 		$left = null;
@@ -8471,9 +8506,34 @@ function brevo_api_dash_snapshot()
 			'lim' => isset($acc['limit']) ? intval($acc['limit']) : 300,
 			'left' => $left,
 			'used' => isset($brevo_api_sent[$id]) ? intval($brevo_api_sent[$id]) : 0,
-			'exhausted' => !empty($brevo_api_exhausted[$id])
+			'exhausted' => !empty($brevo_api_exhausted[$id]),
+			'skip' => !empty($skipMap[$id]),
+			'status' => isset($statusMap[$id]) ? (string)$statusMap[$id] : ''
 		);
 	}
+	return $rows;
+}
+
+function dash_live_state_write($extra = array())
+{
+	global $brevo_api_cur, $smtp_mode, $mail_queue_campaign;
+	$rows = array();
+	if(isset($smtp_mode) && $smtp_mode === 'brevo_api')
+		$rows = brevo_api_dash_rows();
+	$row = array_merge(array(
+		'updated_at' => date('c'),
+		'mode' => isset($smtp_mode) ? $smtp_mode : '',
+		'campaign' => !empty($mail_queue_campaign),
+		'api_accounts' => $rows,
+		'api_active' => isset($brevo_api_cur) ? intval($brevo_api_cur) : -1
+	), $extra);
+	@file_put_contents(__DIR__.DIRECTORY_SEPARATOR.'dash_live_state.json', json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
+function brevo_api_dash_snapshot()
+{
+	global $brevo_api_cur;
+	$rows = brevo_api_dash_rows();
 	$active = isset($brevo_api_cur) ? intval($brevo_api_cur) : -1;
 	dash_live_state_write(array('api_accounts' => $rows, 'api_active' => $active));
 	dash_js('dashApiSetAccounts('.json_encode($rows, JSON_UNESCAPED_UNICODE).','.$active.');');
@@ -8552,6 +8612,18 @@ function brevo_api_err_is_credits($err)
 	return (strpos($e, 'credit') !== false || strpos($e, 'quota') !== false
 		|| strpos($e, 'not enough') !== false || strpos($e, 'exceed') !== false
 		|| (strpos($e, 'plan') !== false && (strpos($e, 'limit') !== false || strpos($e, 'over') !== false)));
+}
+
+function brevo_api_err_is_account($err, $http = 0)
+{
+	$http = intval($http);
+	if($http === 401 || $http === 403) return true;
+	$e = strtolower((string)$err);
+	if(strpos($e, 'account_under_validation') !== false || strpos($e, 'under verification') !== false) return true;
+	if(strpos($e, 'unauthorized') !== false || strpos($e, 'invalid_api_key') !== false || strpos($e, 'api key') !== false) return true;
+	if(strpos($e, 'permission') !== false || strpos($e, 'not activated') !== false) return true;
+	if(strpos($e, 'sender') !== false && (strpos($e, 'not valid') !== false || strpos($e, 'not verified') !== false || strpos($e, 'does not exist') !== false)) return true;
+	return false;
 }
 
 /** Remaining email credits from Brevo GET /v3/account (plan sendLimit). */
@@ -8769,6 +8841,7 @@ function smtp_pick_next($after_idx = null)
 		return true;
 	}
 
+	if($smtp_mode === 'normal') smtp_daily_sync_sent();
 	$start = ($after_idx === null) ? $curentsmtp : (($after_idx + 1) % $total);
 	for($i = 0; $i < $total; $i++)
 	{
@@ -8798,6 +8871,125 @@ function smtp_note_sent_ok()
 		return;
 	}
 	dash_log('info', 'SMTP '.($curentsmtp+1).' quota '.$smtp_sent[$curentsmtp].'/'.$nrotat);
+	if($smtp_mode === 'normal') smtp_daily_mark($curentsmtp, 'sent', '');
+}
+
+function smtp_daily_id($line)
+{
+	$line = trim((string)$line);
+	$parts = (strpos($line, '|') !== false) ? explode('|', $line) : explode(':', $line);
+	if(count($parts) >= 3 && strpos($parts[2], '@') !== false)
+		return strtolower(trim($parts[2]));
+	return strtolower($line);
+}
+
+function smtp_daily_read()
+{
+	$path = __DIR__.DIRECTORY_SEPARATOR.'smtp_daily.json';
+	$today = date('Y-m-d');
+	$empty = array('date' => $today, 'sent' => array(), 'dead' => array());
+	$fh = @fopen($path, 'c+');
+	if(!$fh) return $empty;
+	flock($fh, LOCK_SH);
+	$raw = stream_get_contents($fh);
+	flock($fh, LOCK_UN);
+	fclose($fh);
+	$data = json_decode((string)$raw, true);
+	if(!is_array($data) || empty($data['date']) || $data['date'] !== $today)
+		return $empty;
+	if(empty($data['sent']) || !is_array($data['sent'])) $data['sent'] = array();
+	if(empty($data['dead']) || !is_array($data['dead'])) $data['dead'] = array();
+	return $data;
+}
+
+function smtp_daily_write($data)
+{
+	$path = __DIR__.DIRECTORY_SEPARATOR.'smtp_daily.json';
+	$fh = @fopen($path, 'c+');
+	if(!$fh) return false;
+	flock($fh, LOCK_EX);
+	ftruncate($fh, 0);
+	rewind($fh);
+	fwrite($fh, json_encode($data));
+	fflush($fh);
+	flock($fh, LOCK_UN);
+	fclose($fh);
+	return true;
+}
+
+function smtp_daily_sync_sent()
+{
+	global $allsmtps, $smtp_sent, $nrotat, $smtp_mode;
+	if($smtp_mode !== 'normal') return;
+	$data = smtp_daily_read();
+	$cap = max(1, intval($nrotat));
+	foreach($allsmtps as $idx => $line)
+	{
+		$id = smtp_daily_id($line);
+		if($id === '') continue;
+		if(!empty($data['dead'][$id]))
+			$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, $cap);
+		else if(!empty($data['sent'][$id]))
+			$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, intval($data['sent'][$id]));
+	}
+}
+
+function smtp_daily_mark($idx, $kind, $reason)
+{
+	global $allsmtps, $smtp_sent, $nrotat, $smtp_mode;
+	if($smtp_mode !== 'normal') return;
+	$idx = intval($idx);
+	if(!isset($allsmtps[$idx]) || $allsmtps[$idx] === '') return;
+	$id = smtp_daily_id($allsmtps[$idx]);
+	if($id === '') return;
+	$path = __DIR__.DIRECTORY_SEPARATOR.'smtp_daily.json';
+	$today = date('Y-m-d');
+	$fh = @fopen($path, 'c+');
+	if(!$fh) return;
+	flock($fh, LOCK_EX);
+	$raw = stream_get_contents($fh);
+	$data = json_decode((string)$raw, true);
+	if(!is_array($data) || empty($data['date']) || $data['date'] !== $today)
+		$data = array('date' => $today, 'sent' => array(), 'dead' => array());
+	if(empty($data['sent']) || !is_array($data['sent'])) $data['sent'] = array();
+	if(empty($data['dead']) || !is_array($data['dead'])) $data['dead'] = array();
+	if($kind === 'dead')
+		$data['dead'][$id] = substr(trim((string)$reason), 0, 180);
+	else
+		$data['sent'][$id] = (isset($data['sent'][$id]) ? intval($data['sent'][$id]) : 0) + 1;
+	rewind($fh);
+	ftruncate($fh, 0);
+	fwrite($fh, json_encode($data));
+	fflush($fh);
+	flock($fh, LOCK_UN);
+	fclose($fh);
+	if($kind === 'dead')
+		$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, max(1, intval($nrotat)));
+	else
+		$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, intval($data['sent'][$id]));
+}
+
+function smtp_err_is_recipient($err)
+{
+	$e = strtolower((string)$err);
+	return (strpos($e, 'user unknown') !== false
+		|| strpos($e, 'no such user') !== false
+		|| strpos($e, 'recipient rejected') !== false
+		|| strpos($e, '5.1.1') !== false
+		|| strpos($e, 'does not exist') !== false
+		|| strpos($e, 'invalid recipient') !== false
+		|| strpos($e, 'mailbox not found') !== false);
+}
+
+function smtp_err_skip_today($err)
+{
+	if(smtp_err_is_recipient($err)) return false;
+	$e = strtolower((string)$err);
+	if(strpos($e, 'timed out') !== false || strpos($e, 'timeout') !== false
+		|| strpos($e, 'failed to connect') !== false || strpos($e, 'could not connect') !== false
+		|| strpos($e, 'connection refused') !== false || strpos($e, 'network is unreachable') !== false)
+		return false;
+	return true;
 }
 
 function dash_flush()
@@ -8839,15 +9031,17 @@ function dash_boot($total, $smtpCount, $proxyCount = 0)
 	else
 	echo '<div class="stat info"><b id="d-proxy">'.($isApi?'Brevo API':'direct').'</b><span>Transport</span></div>';
 	echo '</div>';
-	echo '<div class="barwrap"><div class="barlab"><span>Send progress</span><span id="d-send-pct">0%</span></div><div class="bar"><i id="d-bar"></i></div></div>';
+	$barLab = $isApi ? 'Checking accounts' : 'Send progress';
+	echo '<div class="barwrap"><div class="barlab"><span id="d-send-lab">'.$barLab.'</span><span id="d-send-pct">0%</span></div><div class="bar"><i id="d-bar"></i></div></div>';
 	echo '<div class="meta" id="d-meta">Preparing campaign…</div></div>';
 
 	if($isApi)
 	{
-	echo '<div class="panel" id="panel-api-credits"><div class="pt">Brevo credits <em id="api-cred-state">LIVE</em></div>';
+	echo '<div class="panel" id="panel-api-credits"><div class="pt">Brevo credits <em id="api-cred-state">CHECKING</em></div>';
 	echo '<div class="api-credits">';
 	echo '<div class="api-total"><div><span>Total left (all accounts)</span><b id="api-total-left">—</b></div><div style="text-align:right"><span>Accounts</span><b id="api-acct-count" style="font-size:18px;color:var(--info)">'.$smtpCount.'</b></div></div>';
 	echo '<div class="api-active"><span id="api-active-label">Active account — left now</span><b id="api-active-left">—</b></div>';
+	echo '<div class="barwrap" id="api-check-wrap"><div class="barlab"><span id="api-check-lab">Checking accounts</span><span id="api-check-pct">0%</span></div><div class="bar filt"><i id="api-check-bar"></i></div></div>';
 	echo '<div id="api-acct-list"></div>';
 	echo '</div></div>';
 	}
@@ -8882,7 +9076,7 @@ function dashApiRender(){
   var active=window.__dash.apiActive;
   var total=0, known=0;
   list.forEach(function(a){
-    if(a.exhausted) return;
+    if(a.exhausted || a.skip) return;
     if(a.left!=null && a.left!==""){ total+=Math.max(0,Math.floor(a.left)); known++; }
   });
   dashSet("api-total-left", known? String(Math.floor(total)) : "—");
@@ -8901,12 +9095,38 @@ function dashApiRender(){
   wrap.innerHTML="";
   list.forEach(function(a){
     var row=document.createElement("div");
-    row.className="api-row"+(a.id===active?" on":"")+(a.exhausted?" dead":"");
-    var leftTxt=a.exhausted? "0 left" : (a.left!=null? (Math.floor(a.left)+" left") : "? left");
+    var checking=a.status==="Checking…";
+    row.className="api-row"+(a.id===active?" on":"")+(a.skip?" bad":(a.exhausted?" dead":""));
+    var leftTxt=checking? "…" : (a.skip? "Skipped" : (a.exhausted? "0 left" : (a.left!=null? (Math.floor(a.left)+" left") : "? left")));
     var usedTxt=(a.used!=null?a.used:0)+"/"+(a.lim||300);
-    row.innerHTML="<div><b>Account "+(a.id+1)+"</b><div class=\\"muted\\">"+__esc(a.from||"")+(a.id===active?" · SENDING":"")+(a.exhausted?" · EMPTY":"")+"</div></div><div style=\\"text-align:right\\"><b>"+leftTxt+"</b><div class=\\"muted\\">sent "+usedTxt+"</div></div>";
+    var st=a.status? "<div class=\\"st\\">"+__esc(a.status)+"</div>" : "";
+    row.innerHTML="<div><b>Account "+(a.id+1)+"</b><div class=\\"muted\\">"+__esc(a.from||"")+(a.id===active && !checking?" · SENDING":"")+(a.exhausted && !a.skip?" · EMPTY":"")+"</div>"+st+"</div><div style=\\"text-align:right\\"><b>"+leftTxt+"</b><div class=\\"muted\\">sent "+usedTxt+"</div></div>";
     wrap.appendChild(row);
   });
+}
+function dashApiCheckProgress(done, total, label){
+  var pct=total? Math.min(100, Math.round(done*100/total)) : 0;
+  var bar=document.getElementById("api-check-bar");
+  if(bar) bar.style.width=pct+"%";
+  dashSet("api-check-pct", pct+"%");
+  dashSet("api-check-lab", label||"Checking accounts");
+  if(!window.__dash.sending){
+    var sbar=document.getElementById("d-bar");
+    if(sbar) sbar.style.width=pct+"%";
+    dashSet("d-send-pct", pct+"%");
+    dashSet("d-send-lab", "Checking accounts");
+    dashSet("dash-status", label||"Checking accounts…");
+    dashMeta(label||"Checking accounts…");
+  }
+}
+function dashSendStarted(){
+  window.__dash.sending=true;
+  var sbar=document.getElementById("d-bar");
+  if(sbar) sbar.style.width="0%";
+  dashSet("d-send-pct", "0%");
+  dashSet("d-send-lab", "Send progress");
+  var wrap=document.getElementById("api-check-wrap");
+  if(wrap) wrap.style.display="none";
 }
 function dashApiSetAccounts(list, activeId){
   window.__dash.apiAccounts=list||[];
@@ -9464,8 +9684,46 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		}
 		else
 		{
-			campaign_event($cli_campaign, 'fail', 'FAIL '.$to.' — '.(isset($attempt['err'])?$attempt['err']:'').' [w'.$cli_worker_id.']', array('done' => $i+1));
-			campaign_bump($cli_campaign, 'fail');
+			$failErr = isset($attempt['err']) ? $attempt['err'] : '';
+			$saved = false;
+			if($smtp_mode === 'normal' && !smtp_err_is_recipient($failErr) && empty($attempt['queued']))
+			{
+				if(smtp_err_skip_today($failErr)) smtp_daily_mark($curentsmtp, 'dead', $failErr);
+				$guard = 0;
+				while($guard < count($allsmtps))
+				{
+					$guard++;
+					if(!smtp_pick_next($curentsmtp)) break;
+					smtp_apply_current(false);
+					if(!empty($mail->Username))
+					{
+						$mail->From = $mail->Username;
+						$mail->Sender = $mail->Username;
+					}
+					$mail->clearAllRecipients();
+					$mail->AddAddress($to);
+					$attempt = mailer_socks_send_attempt($to);
+					if(!empty($attempt['ok']))
+					{
+						$saved = true;
+						campaign_event($cli_campaign, 'ok', 'OK  '.$to.' [w'.$cli_worker_id.']', array('done' => $i+1));
+						campaign_bump($cli_campaign, 'ok');
+						$fh = @fopen($cli_campaign.DIRECTORY_SEPARATOR.'done.txt', 'a');
+						if($fh) { flock($fh, LOCK_EX); fwrite($fh, $to."\n"); flock($fh, LOCK_UN); fclose($fh); }
+						if(!empty($cfg['mail_queue_campaign'])) mail_queue_mark_done($to);
+						smtp_note_sent_ok();
+						break;
+					}
+					$failErr = isset($attempt['err']) ? $attempt['err'] : '';
+					if(!empty($attempt['queued']) || smtp_err_is_recipient($failErr)) break;
+					if(smtp_err_skip_today($failErr)) smtp_daily_mark($curentsmtp, 'dead', $failErr);
+				}
+			}
+			if(!$saved)
+			{
+				campaign_event($cli_campaign, 'fail', 'FAIL '.$to.' — '.$failErr.' [w'.$cli_worker_id.']', array('done' => $i+1));
+				campaign_bump($cli_campaign, 'fail');
+			}
 		}
 		$p = isset($cfg['pause']) ? doubleval($cfg['pause']) : 0;
 		if($p > 0) usleep((int)($p * 500000)); // half pause in parallel
@@ -9551,7 +9809,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	if($needFormFrom && ($formFrom === '' || strpos($formFrom, '@') === false))
 	{
 		dash_boot(0, 0, 0);
-		dash_log('fail', 'Brevo API: set From email on each account (Edit From).');
+		dash_log('fail', 'Brevo API: set From email on each account (Edit).');
 		dash_js("dashDone('No From email');");
 		send_mark_stopped();
 		die();
@@ -9571,48 +9829,98 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		dash_log('info', 'Queue: pending '.$qCounts['pending'].' · sent OK '.$qCounts['done'].' · in list '.$qCounts['valid'].$resumeMsg);
 		mail_queue_save_progress(array('phase' => 'start', 'credits_room' => null));
 	}
-	dash_js("dashSet('api-cred-state','FETCHING'); dashMeta('Fetching Brevo credits (once)…');");
+	dash_js("dashSet('api-cred-state','CHECKING'); dashMeta('Checking accounts…');");
 
 	$brevo_api_credits = array();
 	$brevo_api_exhausted = array();
+	$brevo_api_status = array();
+	$brevo_api_skip = array();
 	$anyRoom = false;
+	$blockedN = 0;
+	$accTotal = count($brevo_api_accounts);
+	$brevo_api_cur = -1;
+	foreach($brevo_api_accounts as $aid => $acc)
+		$brevo_api_status[$aid] = 'Checking…';
+	brevo_api_dash_snapshot();
+	dash_js('dashApiCheckProgress(0,'.intval($accTotal).','.json_encode('Checking 0 / '.$accTotal).');');
+	$checked = 0;
 	foreach($brevo_api_accounts as $aid => $acc)
 	{
 		$fkey = !empty($acc['key']) ? (substr($acc['key'], 0, 12).'…') : '(no key)';
 		$ff = !empty($acc['from']) ? $acc['from'] : ($formFrom !== '' ? $formFrom.' (form)' : '(missing)');
-		$cred = brevo_api_fetch_credits_left($acc['key']);
-		if(!empty($cred['ok']))
+		dash_js('dashApiCheckProgress('.intval($checked).','.intval($accTotal).','.json_encode('Checking account '.($aid + 1).' / '.$accTotal).'); dashApiActive('.intval($aid).');');
+		if(!empty($acc['problem']))
+		{
+			$blockedN++;
+			$brevo_api_exhausted[$aid] = true;
+			$brevo_api_credits[$aid] = 0;
+			$brevo_api_skip[$aid] = true;
+			$brevo_api_status[$aid] = 'Marked problem';
+			dash_log('warn', '  Account '.($aid + 1).': SKIP · marked problem · from '.$ff);
+			$checked++;
+			brevo_api_dash_snapshot();
+			dash_js('dashApiCheckProgress('.intval($checked).','.intval($accTotal).','.json_encode('Checked '.$checked.' / '.$accTotal).');');
+			continue;
+		}
+		$cred = brevo_account_health($acc['key'], !empty($acc['from']) ? $acc['from'] : $formFrom);
+		if(!empty($cred['blocking']))
+		{
+			$blockedN++;
+			$brevo_api_exhausted[$aid] = true;
+			$brevo_api_credits[$aid] = 0;
+			$brevo_api_skip[$aid] = true;
+			$brevo_api_status[$aid] = !empty($cred['status_text']) ? $cred['status_text'] : 'Skipped';
+			dash_log('warn', '  Account '.($aid + 1).': SKIP · '.$cred['status_text'].' · from '.$ff);
+		}
+		else if(!empty($cred['ok']))
 		{
 			$brevo_api_credits[$aid] = floatval($cred['credits']);
 			$leftN = intval(floor($cred['credits']));
 			$room = min(intval($acc['limit']), $leftN);
+			$extra = !empty($cred['status_text']) ? (' · '.$cred['status_text']) : '';
+			$brevo_api_status[$aid] = !empty($cred['status_text']) ? $cred['status_text'] : '';
 			if($leftN < 1)
 			{
 				$brevo_api_exhausted[$aid] = true;
-				dash_log('warn', '  Account '.($aid + 1).': SKIP · 0 left · from '.$ff);
+				$brevo_api_skip[$aid] = true;
+				$brevo_api_status[$aid] = '0 left today';
+				dash_log('warn', '  Account '.($aid + 1).': SKIP · 0 left · from '.$ff.$extra);
 			}
 			else
 			{
 				$anyRoom = true;
-				dash_log('info', '  Account '.($aid + 1).': limit '.$acc['limit'].' · Brevo '.$leftN.' left · can send '.$room.' · from '.$ff);
+				dash_log('info', '  Account '.($aid + 1).': limit '.$acc['limit'].' · Brevo '.$leftN.' left · can send '.$room.' · from '.$ff.$extra);
 			}
 		}
 		else
 		{
 			$brevo_api_credits[$aid] = null;
 			$anyRoom = true;
+			$brevo_api_status[$aid] = !empty($cred['err']) ? $cred['err'] : 'Credits fetch failed';
 			dash_log('warn', '  Account '.($aid + 1).': credits fetch failed ('.$cred['err'].') — mailer limit only · from '.$ff);
 		}
+		$checked++;
+		brevo_api_dash_snapshot();
+		dash_js('dashApiCheckProgress('.intval($checked).','.intval($accTotal).','.json_encode('Checked '.$checked.' / '.$accTotal).');');
 	}
 	brevo_api_dash_snapshot();
+	dash_js('dashApiCheckProgress('.intval($accTotal).','.intval($accTotal).','.json_encode('Accounts ready').');');
 	dash_js("dashSet('api-cred-state','READY');");
 
 	$totalRoom = brevo_api_total_room();
 	if(!$anyRoom || $totalRoom < 1 || brevo_api_pick_next() === false)
 	{
 		brevo_api_dash_snapshot();
-		dash_log('fail', 'No credits left today. Come back tomorrow (or add another account).');
-		dash_js("dashDone('0 credits today — try tomorrow');");
+		if($blockedN > 0 && $blockedN >= count($brevo_api_accounts))
+		{
+			dash_log('fail', 'Every Brevo account is skipped (marked problem, under verification, or sender). Nothing was sent.');
+			dash_js("dashDone('All accounts skipped');");
+		}
+		else
+		{
+			dash_log('fail', 'No credits left today. Come back tomorrow (or add another account).');
+			dash_js("dashDone('0 credits today — try tomorrow');");
+		}
 		send_mark_stopped();
 		die();
 	}
@@ -9650,7 +9958,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		));
 	}
 	content_variants_prepare(count($brevo_api_accounts));
-	dash_js("dashProxy('Brevo API'); dashSmtp('API × ".count($brevo_api_accounts)."');");
+	dash_js("dashSendStarted(); dashProxy('Brevo API'); dashSmtp('API × ".count($brevo_api_accounts)."');");
 	dash_log('info', 'Content: '.count($content_variants).' HTML variant(s) split across '.count($brevo_api_accounts).' API account(s)');
 	$isHtmlApi = ($contenttype == 'html');
 	@unlink(__DIR__.DIRECTORY_SEPARATOR.'pending_emails.txt');
@@ -9759,6 +10067,12 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			{
 				brevo_api_mark_exhausted($brevo_api_cur, $lastErr);
 				dash_log('warn', 'Account '.($brevo_api_cur + 1).' out of credits — retry '.$to.' on next account');
+				continue;
+			}
+			if(brevo_api_err_is_account($lastErr, $httpCode))
+			{
+				brevo_api_mark_exhausted($brevo_api_cur, $lastErr);
+				dash_log('warn', 'Account '.($brevo_api_cur + 1).' blocked — retry '.$to.' on next account');
 				continue;
 			}
 			dash_log('fail', 'FAIL '.$to.' — '.$lastErr.($isTestSend ? '' : ' (not marked done — will retry next run)'));
@@ -9893,7 +10207,15 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	}
 	else
 	dash_log('warn', 'MODE: Normal without SOCKS — if connect fails, enable USE SOCKS5.');
-	dash_log('info', (!empty($mail_queue_campaign) ? 'Recipients: CAMPAIGN queue' : 'Recipients: TEST box').' · '.$numemails.' | SMTPs: '.$smtpCount.' | Limit: '.($smtp_mode==='brevo'?'per Brevo account':($nrotat.'/SMTP')).' | Workers: '.$send_workers);
+	dash_log('info', (!empty($mail_queue_campaign) ? 'Recipients: CAMPAIGN queue' : 'Recipients: TEST box').' · '.$numemails.' | SMTPs: '.$smtpCount.' | Limit: '.($smtp_mode==='brevo'?'per Brevo account':($nrotat.'/SMTP today')).' | Workers: '.$send_workers);
+	if($smtp_mode === 'normal' && !empty($allsmtps))
+	{
+		smtp_daily_sync_sent();
+		$fullToday = 0;
+		$capNow = max(1, intval($nrotat));
+		foreach($allsmtps as $si => $sline) { if(isset($smtp_sent[$si]) && intval($smtp_sent[$si]) >= $capNow) $fullToday++; }
+		dash_log('info', 'Normal SMTP: limit '.$capNow.' each today · '.$fullToday.' accounts already full or blocked · '.(count($allsmtps) - $fullToday).' still have room');
+	}
 	if(!empty($mail_queue_campaign)) dash_log('info', 'OK → mailssenddone.txt (campaign list never deleted)');
 	
 	if(!empty($epriority))
@@ -10134,8 +10456,74 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	}
 	else
 	{
-	dash_log('fail', 'FAIL '.$to.' — '.(isset($attempt['err']) ? $attempt['err'] : 'not sent'));
-	dash_js('dashFail();');
+	$failErr = isset($attempt['err']) ? $attempt['err'] : 'not sent';
+	$recipientFault = smtp_err_is_recipient($failErr);
+	if($smtp_mode === 'normal' && !empty($allsmtps) && $default_system != "1" && !$recipientFault)
+	{
+		$noted = false;
+		if(smtp_err_skip_today($failErr)) smtp_daily_mark($curentsmtp, 'dead', $failErr);
+		dash_log('warn', 'SMTP '.($curentsmtp+1).' failed — try the next account · '.$failErr);
+		$guard = 0;
+		while($guard < count($allsmtps))
+		{
+			$guard++;
+			if(!smtp_pick_next($curentsmtp))
+			{
+				dash_log('fail', 'FAIL '.$to.' — no SMTP left today');
+				dash_js('dashFail();');
+				$noted = true;
+				break;
+			}
+			smtp_apply_current(true);
+			if(!empty($mail->Username))
+			{
+				$from = $mail->Username;
+				$mail->From = $from;
+				$mail->Sender = $from;
+			}
+			$mail->clearAddresses();
+			$mail->AddAddress($to);
+			dash_log('info', 'From: '.$from.' → To: '.$to.' (next account)');
+			$attempt = mailer_socks_send_attempt($to);
+			if(!empty($attempt['ok']))
+			{
+				$send_ok = true;
+				dash_log('ok', 'OK  '.$to);
+				dash_js('dashOk();');
+				if(!empty($mail_queue_campaign)) mail_queue_mark_done($to);
+				if($use_socks) socks_reload_ok_from_disk();
+				$noted = true;
+				break;
+			}
+			$failErr = isset($attempt['err']) ? $attempt['err'] : 'not sent';
+			if(!empty($attempt['queued']))
+			{
+				dash_log('fail', 'QUEUED '.$to.' → failed_emails.txt');
+				dash_js('dashQueue();');
+				$noted = true;
+				break;
+			}
+			if(smtp_err_is_recipient($failErr))
+			{
+				dash_log('fail', 'FAIL '.$to.' — '.$failErr);
+				dash_js('dashFail();');
+				$noted = true;
+				break;
+			}
+			if(smtp_err_skip_today($failErr)) smtp_daily_mark($curentsmtp, 'dead', $failErr);
+			dash_log('warn', 'SMTP '.($curentsmtp+1).' failed — next account · '.$failErr);
+		}
+		if(!$send_ok && !$noted)
+		{
+			dash_log('fail', 'FAIL '.$to.' — no SMTP left today');
+			dash_js('dashFail();');
+		}
+	}
+	else
+	{
+		dash_log('fail', 'FAIL '.$to.' — '.$failErr);
+		dash_js('dashFail();');
+	}
 	}
 
 	// Count only successful sends toward daily limit (per SMTP or Brevo account)
