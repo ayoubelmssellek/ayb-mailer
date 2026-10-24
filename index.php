@@ -8865,14 +8865,20 @@ function smtp_mark_skip($idx, $reason = 'failed')
 	if(!is_array($smtp_skip)) $smtp_skip = array();
 	if(!is_array($smtp_maxed)) $smtp_maxed = array();
 	$smtp_skip[$idx] = true;
-	if($reason === 'max')
+		if($reason === 'max')
 	{
 		$smtp_maxed[$idx] = true;
 		$sent = isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0;
-		dash_log('warn', 'SMTP '.($idx+1).' reached '.$sent.'/'.$nrotat.' per day — out for the rest of this send');
+		$msg = 'SMTP '.($idx+1).' reached '.$sent.'/'.$nrotat.' per day — out for the rest of this send';
+		dash_log('warn', $msg);
+		global $cli_campaign, $cli_worker_id;
+		if(!empty($cli_campaign)) campaign_event($cli_campaign, 'warn', $msg.' [w'.intval($cli_worker_id).']');
 		return;
 	}
-	dash_log('warn', 'SMTP '.($idx+1).' failed — skip until the other SMTPs are used ('.count($smtp_skip).'/'.count($allsmtps).')');
+	$msg = 'SMTP '.($idx+1).' failed — skip until the other SMTPs are used ('.count($smtp_skip).'/'.count($allsmtps).')';
+	dash_log('warn', $msg);
+	global $cli_campaign, $cli_worker_id;
+	if(!empty($cli_campaign)) campaign_event($cli_campaign, 'warn', $msg.' [w'.intval($cli_worker_id).']');
 }
 
 /** Count SMTPs still under the per-SMTP max, then pick one at random. */
@@ -8915,10 +8921,75 @@ function smtp_pick_random()
 		foreach($choices as $i) if($i !== intval($curentsmtp)) $filtered[] = $i;
 		if(!empty($filtered)) $choices = $filtered;
 	}
+	global $smtp_held, $cli_worker_id;
+	if(is_array($smtp_held) && !empty($smtp_held) && count($choices) > 1)
+	{
+		$me = intval($cli_worker_id);
+		$free = array();
+		foreach($choices as $i) if(!isset($smtp_held[$i]) || intval($smtp_held[$i]) === $me) $free[] = $i;
+		if(!empty($free)) $choices = $free;
+	}
 	$curentsmtp = $choices[array_rand($choices)];
 	$sentNow = isset($smtp_sent[$curentsmtp]) ? intval($smtp_sent[$curentsmtp]) : 0;
 	dash_log('info', 'Random SMTP '.($curentsmtp+1).' of '.$total.' · '.$sentNow.'/'.$limit.' · '.count($pool).' available');
+	global $cli_campaign;
+	if(!empty($cli_campaign))
+		campaign_event($cli_campaign, 'info', 'Random SMTP '.($curentsmtp+1).' of '.$total.' · '.$sentNow.'/'.$limit.(!empty($cli_worker_id) || $cli_worker_id === 0 ? ' [w'.$cli_worker_id.']' : ''));
 	return true;
+}
+
+function smtp_pool_file()
+{
+	global $cli_campaign;
+	if(!empty($cli_campaign) && is_dir($cli_campaign))
+		return rtrim($cli_campaign, '/\\').DIRECTORY_SEPARATOR.'smtp_pool.json';
+	return '';
+}
+
+function smtp_pool_load()
+{
+	global $smtp_sent, $smtp_skip, $smtp_maxed, $smtp_held;
+	$smtp_sent = array();
+	$smtp_skip = array();
+	$smtp_maxed = array();
+	$smtp_held = array();
+	$file = smtp_pool_file();
+	if($file === '' || !is_file($file)) return;
+	$j = json_decode((string)@file_get_contents($file), true);
+	if(!is_array($j)) return;
+	if(!empty($j['sent']) && is_array($j['sent']))
+		foreach($j['sent'] as $k => $v) $smtp_sent[intval($k)] = intval($v);
+	if(!empty($j['skip']) && is_array($j['skip']))
+		foreach($j['skip'] as $k => $v) if($v) $smtp_skip[intval($k)] = true;
+	if(!empty($j['maxed']) && is_array($j['maxed']))
+		foreach($j['maxed'] as $k => $v) if($v) $smtp_maxed[intval($k)] = true;
+	if(!empty($j['held']) && is_array($j['held']))
+		foreach($j['held'] as $k => $v) $smtp_held[intval($k)] = intval($v);
+}
+
+function smtp_pool_save()
+{
+	$file = smtp_pool_file();
+	if($file === '') return;
+	global $smtp_sent, $smtp_skip, $smtp_maxed, $smtp_held;
+	$pack = array('sent' => array(), 'skip' => array(), 'maxed' => array(), 'held' => array());
+	if(is_array($smtp_sent)) foreach($smtp_sent as $k => $v) $pack['sent'][(string)intval($k)] = intval($v);
+	if(is_array($smtp_skip)) foreach($smtp_skip as $k => $v) if($v) $pack['skip'][(string)intval($k)] = 1;
+	if(is_array($smtp_maxed)) foreach($smtp_maxed as $k => $v) if($v) $pack['maxed'][(string)intval($k)] = 1;
+	if(is_array($smtp_held)) foreach($smtp_held as $k => $v) $pack['held'][(string)intval($k)] = intval($v);
+	@file_put_contents($file, json_encode($pack));
+}
+
+function smtp_pool_locked($fn)
+{
+	$file = smtp_pool_file();
+	if($file === '') { $fn(); return; }
+	$lk = @fopen($file.'.lock', 'c+');
+	if($lk) flock($lk, LOCK_EX);
+	smtp_pool_load();
+	$fn();
+	smtp_pool_save();
+	if($lk) { flock($lk, LOCK_UN); fclose($lk); }
 }
 
 function dash_flush()
@@ -9302,9 +9373,10 @@ function campaign_bump($campaignDir, $key, $by = 1)
 
 function campaign_parallel_master($emails, $cfg, $numWorkers)
 {
-	global $mail;
+	global $mail, $cli_campaign;
 	$numWorkers = max(1, min(15, intval($numWorkers)));
 	$dir = __DIR__ . DIRECTORY_SEPARATOR . 'campaigns' . DIRECTORY_SEPARATOR . 'run_'.date('Ymd_His').'_'.getmypid();
+	$cli_campaign = $dir;
 	@mkdir($dir, 0777, true);
 	@file_put_contents($dir.DIRECTORY_SEPARATOR.'emails.txt', implode("\n", $emails)."\n");
 	@file_put_contents($dir.DIRECTORY_SEPARATOR.'config.json', json_encode($cfg));
@@ -9450,8 +9522,22 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 				$mail->clearAllRecipients();
 				if(!empty($allsmtps) && $default_system != '1')
 				{
-					if(!smtp_pick_next($curentsmtp)) { $still[] = $to; continue; }
-					smtp_apply_current(false);
+					$noneLeft = false;
+					$needApply = false;
+					smtp_pool_locked(function() use (&$noneLeft, &$needApply) {
+						global $curentsmtp, $smtp_sent, $smtp_skip, $smtp_maxed, $nrotat;
+						$limit = max(1, intval($nrotat));
+						$used = ($curentsmtp >= 0 && isset($smtp_sent[$curentsmtp])) ? intval($smtp_sent[$curentsmtp]) : 0;
+						$bad = ($curentsmtp < 0) || !empty($smtp_maxed[$curentsmtp]) || !empty($smtp_skip[$curentsmtp]) || $used >= $limit;
+						if($bad)
+						{
+							$prev = $curentsmtp;
+							if(!smtp_pick_random()) { $noneLeft = true; return; }
+							$needApply = ($curentsmtp !== $prev);
+						}
+					});
+					if($noneLeft) { $still[] = $to; continue; }
+					if($needApply) smtp_apply_current(false);
 				}
 				if($default_system != '1' && !empty($mail->Username))
 				{
@@ -9462,9 +9548,25 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 				$mail->Subject = isset($cfg['subject']) ? $cfg['subject'] : $mail->Subject;
 				$mail->Body = isset($cfg['message']) ? $cfg['message'] : $mail->Body;
 				$attempt = mailer_socks_send_attempt($to);
-				if(!empty($attempt['ok'])) { dash_log('ok', 'OK (retry) '.$to); dash_js('dashOk();'); }
+				if(!empty($attempt['ok']))
+				{
+					dash_log('ok', 'OK (retry) '.$to); dash_js('dashOk();');
+					if(!empty($allsmtps) && $default_system != '1')
+						smtp_pool_locked(function() {
+							smtp_note_sent_ok();
+							global $curentsmtp, $smtp_sent, $nrotat;
+							$used = isset($smtp_sent[$curentsmtp]) ? intval($smtp_sent[$curentsmtp]) : 0;
+							if($used >= max(1, intval($nrotat))) smtp_mark_skip($curentsmtp, 'max');
+						});
+				}
 				else if(!empty($attempt['queued'])) { $still[] = $to; dash_log('fail', 'Still QUEUED '.$to); }
-				else { $still[] = $to; dash_log('fail', 'FAIL (retry) '.$to); dash_js('dashFail();'); }
+				else
+				{
+					$still[] = $to;
+					if(!empty($allsmtps) && $default_system != '1')
+						smtp_pool_locked(function() { smtp_mark_skip($curentsmtp, 'failed'); });
+					dash_log('fail', 'FAIL (retry) '.$to); dash_js('dashFail();');
+				}
 			}
 			foreach($still as $e) socks_queue_failed_email($e);
 		}
@@ -9502,7 +9604,10 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	$mail_queue_lane = (isset($cfg['mail_queue_lane']) && $cfg['mail_queue_lane'] === 'smtp') ? 'smtp' : 'api';
 	$default_system = '';
 	$smtp_sent = array();
-	$curentsmtp = $cli_worker_id % max(1, count($allsmtps));
+	$smtp_skip = array();
+	$smtp_maxed = array();
+	$smtp_held = array();
+	$curentsmtp = -1;
 	content_variants_prepare(max(1, count($allsmtps)));
 	if($use_socks) load_socks_ok(true);
 	$mail = new PHPMailer();
@@ -9514,7 +9619,14 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	$mail->SMTPAuth = true;
 	$mail->Timeout = $use_socks ? 8 : 30;
 	$mail->SMTPDebug = 0;
-	if(!smtp_pick_next($curentsmtp - 1 < 0 ? -1 : $curentsmtp - 1)) exit(1);
+	$workerPicked = false;
+	smtp_pool_locked(function() use (&$workerPicked) {
+		global $curentsmtp, $cli_worker_id, $smtp_held;
+		$curentsmtp = -1;
+		$workerPicked = smtp_pick_random();
+		if($workerPicked) $smtp_held[intval($curentsmtp)] = intval($cli_worker_id);
+	});
+	if(!$workerPicked) exit(1);
 	smtp_apply_current(false);
 	$mail->FromName = $realname;
 	$totalE = count($allemails);
@@ -9525,18 +9637,34 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		$mail->clearAllRecipients();
 		if(!empty($allsmtps) && $default_system != '1')
 		{
-			// Prefer SMTP slot matching this worker to reduce collisions
-			$want = $cli_worker_id % count($allsmtps);
-			$curentsmtp = $want;
-			if(!smtp_pick_next($want - 1))
+			$needApply = false;
+			$noneLeft = false;
+			smtp_pool_locked(function() use (&$needApply, &$noneLeft) {
+				global $curentsmtp, $smtp_sent, $smtp_skip, $smtp_maxed, $smtp_held, $nrotat, $cli_worker_id;
+				$limit = max(1, intval($nrotat));
+				$used = ($curentsmtp >= 0 && isset($smtp_sent[$curentsmtp])) ? intval($smtp_sent[$curentsmtp]) : 0;
+				$bad = ($curentsmtp < 0) || !empty($smtp_maxed[$curentsmtp]) || !empty($smtp_skip[$curentsmtp]) || $used >= $limit;
+				if($bad)
+				{
+					$prev = $curentsmtp;
+					if(is_array($smtp_held))
+					{
+						foreach($smtp_held as $hi => $hw) if(intval($hw) === intval($cli_worker_id)) unset($smtp_held[$hi]);
+					}
+					if(!smtp_pick_random()) { $noneLeft = true; return; }
+					$needApply = ($curentsmtp !== $prev);
+				}
+				$smtp_held[intval($curentsmtp)] = intval($cli_worker_id);
+			});
+			if($noneLeft)
 			{
-				campaign_event($cli_campaign, 'fail', 'FAIL '.$to.' — SMTP limit', array('done' => $i+1));
+				campaign_event($cli_campaign, 'fail', 'FAIL '.$to.' — SMTP limit [w'.$cli_worker_id.']', array('done' => $i+1));
 				campaign_bump($cli_campaign, 'fail');
 				campaign_bump($cli_campaign, 'done');
 				socks_queue_failed_email($to);
 				continue;
 			}
-			smtp_apply_current(false);
+			if($needApply) smtp_apply_current(false);
 		}
 		if($default_system != '1' && !empty($mail->Username))
 		{
@@ -9574,7 +9702,19 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			if($fh) { flock($fh, LOCK_EX); fwrite($fh, $to."\n"); flock($fh, LOCK_UN); fclose($fh); }
 			if(!empty($cfg['mail_queue_campaign'])) mail_queue_mark_done($to);
 			if(!empty($allsmtps) && $default_system != '1')
-				smtp_note_sent_ok();
+			{
+				smtp_pool_locked(function() {
+					smtp_note_sent_ok();
+					global $curentsmtp, $smtp_sent, $nrotat, $smtp_held, $smtp_maxed, $cli_worker_id;
+					$used = isset($smtp_sent[$curentsmtp]) ? intval($smtp_sent[$curentsmtp]) : 0;
+					if($used >= max(1, intval($nrotat)))
+					{
+						smtp_mark_skip($curentsmtp, 'max');
+						if(isset($smtp_held[$curentsmtp]) && intval($smtp_held[$curentsmtp]) === intval($cli_worker_id))
+							unset($smtp_held[$curentsmtp]);
+					}
+				});
+			}
 			// Keep OK list fresh: reload after each OK send
 			if($use_socks) socks_reload_ok_from_disk();
 		}
@@ -9587,6 +9727,15 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		{
 			campaign_event($cli_campaign, 'fail', 'FAIL '.$to.' — '.(isset($attempt['err'])?$attempt['err']:'').' [w'.$cli_worker_id.']', array('done' => $i+1));
 			campaign_bump($cli_campaign, 'fail');
+			if(!empty($allsmtps) && $default_system != '1')
+			{
+				smtp_pool_locked(function() {
+					smtp_mark_skip($curentsmtp, 'failed');
+					global $smtp_held, $curentsmtp, $cli_worker_id;
+					if(isset($smtp_held[$curentsmtp]) && intval($smtp_held[$curentsmtp]) === intval($cli_worker_id))
+						unset($smtp_held[$curentsmtp]);
+				});
+			}
 		}
 		$p = isset($cfg['pause']) ? doubleval($cfg['pause']) : 0;
 		if($p > 0) usleep((int)($p * 500000)); // half pause in parallel
