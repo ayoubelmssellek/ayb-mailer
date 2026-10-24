@@ -178,7 +178,7 @@ foreach($parsed as $i => $acc)
 	$row['index'] = $i + 1;
 	$row['limit'] = isset($acc['limit']) ? intval($acc['limit']) : 300;
 	$row['from'] = isset($acc['from']) ? $acc['from'] : '';
-	if($row['ok'] && $row['credits'] !== null && empty($row['blocking'])) $total += floatval($row['credits']);
+	if($row['ok'] && $row['credits'] !== null) $total += floatval($row['credits']);
 	$accounts[] = $row;
 }
 

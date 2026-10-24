@@ -1,9 +1,8 @@
 <?php
 /**
  * Brevo account health for the dashboard and for Send.
- * Credits come from GET /v3/account. "Under review" is relay.enabled = false
- * (transactional sending off; the Brevo home banner points at the Deliverability center).
- * "Under verification" is the API error account_under_validation. Sender active comes from GET /v3/senders.
+ * Credits come from GET /v3/account. "Under verification" is the API error
+ * account_under_validation. Sender active comes from GET /v3/senders.
  * Domain verified / authenticated comes from GET /v3/senders/domains/{domain}.
  */
 
@@ -94,9 +93,7 @@ function brevo_account_health($apiKey, $fromEmail = '')
 		if(isset($json['relay']['enabled']))
 		{
 			$out['relay_enabled'] = !empty($json['relay']['enabled']);
-			// Homepage banner: "Your account is under review" while this is false.
-			// Credits can still show. Transactional send is off until Brevo finishes the review.
-			if(!$out['relay_enabled']) $issues[] = 'Under review — transactional email is off. Open the Deliverability center in Brevo';
+			if(!$out['relay_enabled']) $issues[] = 'Transactional email is off';
 		}
 		$best = null;
 		if(!empty($json['plan']) && is_array($json['plan']))
@@ -112,10 +109,7 @@ function brevo_account_health($apiKey, $fromEmail = '')
 					'type' => $ptype,
 					'end' => !empty($p['endDate']) ? $p['endDate'] : ''
 				);
-				$rank = ($ptype === 'subscription') ? 3 : (($ptype === 'free') ? 2 : 1);
-				$bestRank = ($best === null) ? 0 : (($best['type'] === 'subscription') ? 3 : (($best['type'] === 'free') ? 2 : 1));
-				if($best === null || $cand['credits'] > $best['credits'] || ($cand['credits'] == $best['credits'] && $rank > $bestRank))
-					$best = $cand;
+				if($best === null || $ptype === 'free' || $ptype === 'subscription') $best = $cand;
 			}
 		}
 		if($best !== null)
@@ -131,29 +125,15 @@ function brevo_account_health($apiKey, $fromEmail = '')
 		}
 	}
 
+	$senders = brevo_http_get('https://api.brevo.com/v3/senders', $apiKey);
+	$slabel = brevo_api_error_label($senders);
+	if($slabel !== '' && !in_array($slabel, $issues, true)) $issues[] = $slabel;
 	$fromEmail = strtolower(trim((string)$fromEmail));
-	$sendersLabel = '';
-	$sendersOk = false;
-	$senderList = array();
-	$offset = 0;
-	for($page = 0; $page < 10; $page++)
-	{
-		$senders = brevo_http_get('https://api.brevo.com/v3/senders?limit=50&offset='.$offset, $apiKey);
-		$slabel = brevo_api_error_label($senders);
-		if($slabel !== '') { $sendersLabel = $slabel; break; }
-		if($senders['code'] < 200 || $senders['code'] >= 300 || !is_array($senders['json'])) break;
-		$sendersOk = true;
-		$batch = isset($senders['json']['senders']) && is_array($senders['json']['senders']) ? $senders['json']['senders'] : array();
-		foreach($batch as $s) $senderList[] = $s;
-		$count = isset($senders['json']['count']) ? intval($senders['json']['count']) : count($senderList);
-		$offset += count($batch);
-		if(count($batch) < 1 || $offset >= $count) break;
-	}
-	if($sendersLabel !== '' && !in_array($sendersLabel, $issues, true)) $issues[] = $sendersLabel;
-	if($sendersOk && $fromEmail !== '')
+	if($senders['code'] >= 200 && $senders['code'] < 300 && is_array($senders['json']) && $fromEmail !== '')
 	{
 		$found = null;
-		foreach($senderList as $s)
+		$list = isset($senders['json']['senders']) && is_array($senders['json']['senders']) ? $senders['json']['senders'] : array();
+		foreach($list as $s)
 		{
 			if(!is_array($s) || empty($s['email'])) continue;
 			if(strtolower(trim($s['email'])) === $fromEmail)
@@ -184,8 +164,6 @@ function brevo_account_health($apiKey, $fromEmail = '')
 			else if(array_key_exists('authenticated', $dom['json']) && empty($dom['json']['authenticated']))
 				$notes[] = 'Domain not authenticated';
 		}
-		else if($dom['code'] === 404)
-			$notes[] = 'Domain not added in Brevo';
 	}
 
 	$parts = array();
