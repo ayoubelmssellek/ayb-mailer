@@ -8857,6 +8857,70 @@ function smtp_note_sent_ok()
 	dash_log('info', 'SMTP '.($curentsmtp+1).' quota '.$smtp_sent[$curentsmtp].'/'.$nrotat);
 }
 
+/** Normal SMTP: failure stays out until the other SMTPs are used. Daily max stays out for the rest of this send. */
+function smtp_mark_skip($idx, $reason = 'failed')
+{
+	global $smtp_skip, $smtp_maxed, $allsmtps, $nrotat, $smtp_sent;
+	$idx = intval($idx);
+	if(!is_array($smtp_skip)) $smtp_skip = array();
+	if(!is_array($smtp_maxed)) $smtp_maxed = array();
+	$smtp_skip[$idx] = true;
+	if($reason === 'max')
+	{
+		$smtp_maxed[$idx] = true;
+		$sent = isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0;
+		dash_log('warn', 'SMTP '.($idx+1).' reached '.$sent.'/'.$nrotat.' per day — out for the rest of this send');
+		return;
+	}
+	dash_log('warn', 'SMTP '.($idx+1).' failed — skip until the other SMTPs are used ('.count($smtp_skip).'/'.count($allsmtps).')');
+}
+
+/** Count SMTPs still under the per-SMTP max, then pick one at random. */
+function smtp_pick_random()
+{
+	global $allsmtps, $curentsmtp, $nrotat, $smtp_sent, $smtp_skip, $smtp_maxed;
+	$total = count($allsmtps);
+	if($total < 1) return false;
+	if(!is_array($smtp_skip)) $smtp_skip = array();
+	if(!is_array($smtp_maxed)) $smtp_maxed = array();
+	$limit = max(1, intval($nrotat));
+	$collect = function($honor_skip) use ($total, $limit, &$smtp_sent, &$smtp_skip, &$smtp_maxed) {
+		$pool = array();
+		for($i = 0; $i < $total; $i++)
+		{
+			$sent = isset($smtp_sent[$i]) ? intval($smtp_sent[$i]) : 0;
+			if($sent >= $limit || !empty($smtp_maxed[$i])) continue;
+			if($honor_skip && !empty($smtp_skip[$i])) continue;
+			$pool[] = $i;
+		}
+		return $pool;
+	};
+	$pool = $collect(true);
+	if(empty($pool))
+	{
+		$kept = array();
+		foreach($smtp_maxed as $i => $on) if($on) $kept[$i] = true;
+		$hadFailure = false;
+		foreach($smtp_skip as $i => $on) if($on && empty($smtp_maxed[$i])) $hadFailure = true;
+		if($hadFailure)
+			dash_log('info', 'SMTP list pass done — failed SMTPs can be picked again. Ones at the daily max stay out.');
+		$smtp_skip = $kept;
+		$pool = $collect(true);
+	}
+	if(empty($pool)) return false;
+	$choices = $pool;
+	if(count($choices) > 1)
+	{
+		$filtered = array();
+		foreach($choices as $i) if($i !== intval($curentsmtp)) $filtered[] = $i;
+		if(!empty($filtered)) $choices = $filtered;
+	}
+	$curentsmtp = $choices[array_rand($choices)];
+	$sentNow = isset($smtp_sent[$curentsmtp]) ? intval($smtp_sent[$curentsmtp]) : 0;
+	dash_log('info', 'Random SMTP '.($curentsmtp+1).' of '.$total.' · '.$sentNow.'/'.$limit.' · '.count($pool).' available');
+	return true;
+}
+
 function dash_flush()
 {
 	if(function_exists('ob_get_level'))
@@ -9988,11 +10052,26 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	$mail->SMTPKeepAlive = (count($allsmtps) <= 1);
 	$mail->SMTPAuth = true;
 	$mail->Timeout = $use_socks ? 8 : 30;
+	$smtp_skip = array();
+	$smtp_maxed = array();
+	if($smtp_mode === 'brevo')
+	{
 	$curentsmtp = 0;
 	if(!smtp_pick_next(-1))
 	{
 	dash_log('fail', 'No SMTP available.');
 	die();
+	}
+	}
+	else
+	{
+	$curentsmtp = -1;
+	dash_log('info', count($allsmtps).' SMTPs — start on a random one, stay on it until '.$nrotat.' OK or a failure');
+	if(!smtp_pick_random())
+	{
+	dash_log('fail', 'No SMTP available.');
+	die();
+	}
 	}
 	smtp_apply_current(true);
 	// Random From with SMTP auth gets blocked — keep SMTP login as From
@@ -10227,8 +10306,31 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	}
 	//END//
 	
-	// ROUND-ROBIN: next mail uses next SMTP that still has limit left
-	if(!empty($allsmtps) && $default_system != "1" && $x < $numemails)
+	// Normal SMTP: stay on the one that is sending until its max, or drop it after a failure.
+	// Brevo SMTP: keep the account round-robin.
+	if(!empty($allsmtps) && $default_system != "1" && $x < $numemails && !empty($send))
+	{
+	if($smtp_mode !== 'brevo' && !$isbcc)
+	{
+	$usedNow = isset($smtp_sent[$curentsmtp]) ? intval($smtp_sent[$curentsmtp]) : 0;
+	$dayMax = max(1, intval($nrotat));
+	$smtpFailed = empty($send_ok) && empty($attempt['queued']);
+	$smtpFull = $usedNow >= $dayMax;
+	if($smtpFull) smtp_mark_skip($curentsmtp, 'max');
+	else if($smtpFailed) smtp_mark_skip($curentsmtp);
+	if($smtpFailed || $smtpFull)
+	{
+	$prev_smtp = $curentsmtp;
+	if(!smtp_pick_random())
+	{
+	dash_log('fail', 'All SMTPs reached the limit ('.$nrotat.' each) or none are left. Stopping.');
+	dash_js("dashDone('Stopped — daily limit reached');");
+	break;
+	}
+	if($curentsmtp !== $prev_smtp) smtp_apply_current(true);
+	}
+	}
+	else
 	{
 	$do_rotate = !($isbcc && !$canrotat);
 	if($do_rotate)
@@ -10242,6 +10344,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	}
 	if($curentsmtp !== $prev_smtp)
 	smtp_apply_current(true);
+	}
 	}
 	}
 	//END//
@@ -10284,7 +10387,16 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	if(!empty($allsmtps) && $default_system != "1")
 	{
 	$prev_smtp = $curentsmtp;
-	if(!smtp_pick_next($curentsmtp))
+	$retrySwitch = true;
+	if($smtp_mode !== 'brevo')
+	{
+	$usedNow = ($curentsmtp >= 0 && isset($smtp_sent[$curentsmtp])) ? intval($smtp_sent[$curentsmtp]) : 0;
+	$retrySwitch = ($curentsmtp < 0) || !empty($smtp_skip[$curentsmtp]) || !empty($smtp_maxed[$curentsmtp]) || $usedNow >= max(1, intval($nrotat));
+	}
+	if($retrySwitch)
+	{
+	$picked = ($smtp_mode === 'brevo') ? smtp_pick_next($curentsmtp) : smtp_pick_random();
+	if(!$picked)
 	{
 	dash_log('fail', 'Retry stopped — SMTP daily limit');
 	$still_fail[] = $to;
@@ -10292,6 +10404,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	break;
 	}
 	if($curentsmtp !== $prev_smtp) smtp_apply_current(true);
+	}
 	}
 	if($default_system != "1" && !empty($mail->Username))
 	{
@@ -10318,6 +10431,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	else
 	{
 	$still_fail[] = $to;
+	if($smtp_mode !== 'brevo' && !empty($allsmtps) && $default_system != "1") smtp_mark_skip($curentsmtp);
 	dash_log('fail', 'FAIL (retry) '.$to.' — '.(isset($attempt['err']) ? $attempt['err'] : ''));
 	dash_js('dashFail();');
 	}
