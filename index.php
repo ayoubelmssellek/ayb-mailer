@@ -8927,11 +8927,21 @@ function smtp_daily_sync_sent()
 	{
 		$id = smtp_daily_id($line);
 		if($id === '') continue;
-		if(!empty($data['dead'][$id]))
+		if(!empty($data['dead'][$id]) && smtp_err_is_account_block($data['dead'][$id]))
 			$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, $cap);
 		else if(!empty($data['sent'][$id]))
 			$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, intval($data['sent'][$id]));
 	}
+	$changed = false;
+	foreach($data['dead'] as $id => $reason)
+	{
+		if(!smtp_err_is_account_block($reason))
+		{
+			unset($data['dead'][$id]);
+			$changed = true;
+		}
+	}
+	if($changed) smtp_daily_write($data);
 }
 
 function smtp_daily_mark($idx, $kind, $reason)
@@ -8963,7 +8973,7 @@ function smtp_daily_mark($idx, $kind, $reason)
 	fflush($fh);
 	flock($fh, LOCK_UN);
 	fclose($fh);
-	if($kind === 'dead')
+	if($kind === 'dead' && smtp_err_is_account_block($reason))
 		$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, max(1, intval($nrotat)));
 	else
 		$smtp_sent[$idx] = max(isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0, intval($data['sent'][$id]));
@@ -8981,15 +8991,29 @@ function smtp_err_is_recipient($err)
 		|| strpos($e, 'mailbox not found') !== false);
 }
 
-function smtp_err_skip_today($err)
+function smtp_err_is_account_block($err)
 {
 	if(smtp_err_is_recipient($err)) return false;
 	$e = strtolower((string)$err);
-	if(strpos($e, 'timed out') !== false || strpos($e, 'timeout') !== false
-		|| strpos($e, 'failed to connect') !== false || strpos($e, 'could not connect') !== false
-		|| strpos($e, 'connection refused') !== false || strpos($e, 'network is unreachable') !== false)
+	if($e === '' || strpos($e, 'connect') !== false || strpos($e, 'timed out') !== false || strpos($e, 'timeout') !== false
+		|| strpos($e, 'try again') !== false || strpos($e, 'temporarily') !== false)
 		return false;
-	return true;
+	return (strpos($e, '535') !== false
+		|| strpos($e, 'authenticat') !== false
+		|| strpos($e, 'invalid login') !== false
+		|| strpos($e, 'invalid credentials') !== false
+		|| strpos($e, 'bad credentials') !== false
+		|| strpos($e, 'login failed') !== false
+		|| strpos($e, 'account disabled') !== false
+		|| strpos($e, 'account locked') !== false
+		|| strpos($e, 'account suspended') !== false
+		|| strpos($e, 'account blocked') !== false
+		|| strpos($e, 'mailbox disabled') !== false);
+}
+
+function smtp_err_skip_today($err)
+{
+	return smtp_err_is_account_block($err);
 }
 
 function dash_flush()
@@ -10469,7 +10493,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			$guard++;
 			if(!smtp_pick_next($curentsmtp))
 			{
-				dash_log('fail', 'FAIL '.$to.' — no SMTP left today');
+				dash_log('fail', 'FAIL '.$to.' — '.$failErr);
 				dash_js('dashFail();');
 				$noted = true;
 				break;
@@ -10515,7 +10539,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		}
 		if(!$send_ok && !$noted)
 		{
-			dash_log('fail', 'FAIL '.$to.' — no SMTP left today');
+			dash_log('fail', 'FAIL '.$to.' — '.$failErr);
 			dash_js('dashFail();');
 		}
 	}
@@ -10552,8 +10576,25 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	$prev_smtp = $curentsmtp;
 	if(!smtp_pick_next($curentsmtp))
 	{
-	dash_log('fail', $smtp_mode==='brevo' ? 'All Brevo accounts reached daily limit. Stopping.' : ('All SMTPs reached daily limit ('.$nrotat.' each). Stopping.'));
-	dash_js("dashDone('Stopped — daily limit reached');");
+	$capStop = max(1, intval($nrotat));
+	$fullStop = 0;
+	if($smtp_mode === 'normal')
+	{
+		foreach($allsmtps as $si => $sline)
+		{
+			if(isset($smtp_sent[$si]) && intval($smtp_sent[$si]) >= $capStop) $fullStop++;
+		}
+	}
+	if($smtp_mode === 'brevo' || $fullStop >= count($allsmtps))
+	{
+		dash_log('fail', $smtp_mode==='brevo' ? 'All Brevo accounts reached daily limit. Stopping.' : ('All SMTPs reached daily limit ('.$nrotat.' each). Stopping.'));
+		dash_js("dashDone('Stopped — daily limit reached');");
+	}
+	else
+	{
+		dash_log('fail', 'No SMTP could take the next mail. Sent counts were not raised. Stopping this run.');
+		dash_js("dashDone('Stopped — SMTP could not send');");
+	}
 	break;
 	}
 	if($curentsmtp !== $prev_smtp)
