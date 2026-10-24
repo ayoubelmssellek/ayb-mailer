@@ -1589,7 +1589,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <span>/ SMTP / day</span>
             <button type="button" name="reset" id="reset" class="btn btn-ghost">Reset list</button>
           </div>
-          <div class="hint">You set how many mails each account can send today. That number is remembered until tomorrow. Each mail uses one account, then the next mail uses the next account.</div>
+          <div class="hint">You set how many mails each account can send today. That number is remembered until tomorrow. Each run picks accounts at random, and does not use the same account twice until the others have been used.</div>
         </div>
       </div>
     </div>
@@ -8120,7 +8120,7 @@ function switch_smtp()
 	$mail->Username = $user;
 	$mail->Password = $pass;
 	$mail->SMTPAuth = true;
-	$mail->Timeout = 30;
+	$mail->Timeout = 12;
 	$mail->SMTPAutoTLS = true;
 	$mail->SMTPOptions = array(
 		'ssl' => array(
@@ -8841,7 +8841,43 @@ function smtp_pick_next($after_idx = null)
 		return true;
 	}
 
-	if($smtp_mode === 'normal') smtp_daily_sync_sent();
+	if($smtp_mode === 'normal')
+	{
+		smtp_daily_sync_sent();
+		global $smtp_pick_order;
+		if(!isset($smtp_pick_order) || !is_array($smtp_pick_order)) $smtp_pick_order = array();
+		$cap = max(1, intval($nrotat));
+		$guard = 0;
+		while($guard < $total + 1)
+		{
+			$guard++;
+			if(empty($smtp_pick_order))
+			{
+				$pool = array();
+				foreach($allsmtps as $idx => $line)
+				{
+					$sent = isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0;
+					if($sent < $cap) $pool[] = intval($idx);
+				}
+				if(empty($pool)) return false;
+				shuffle($pool);
+				$smtp_pick_order = $pool;
+				if(empty($GLOBALS['smtp_pick_announced']))
+				{
+					$GLOBALS['smtp_pick_announced'] = true;
+					dash_log('info', 'SMTP pick: random order · '.count($pool).' accounts with room · each account once before any repeat');
+				}
+			}
+			$idx = array_shift($smtp_pick_order);
+			$sent = isset($smtp_sent[$idx]) ? intval($smtp_sent[$idx]) : 0;
+			if($sent < $cap)
+			{
+				$curentsmtp = $idx;
+				return true;
+			}
+		}
+		return false;
+	}
 	$start = ($after_idx === null) ? $curentsmtp : (($after_idx + 1) % $total);
 	for($i = 0; $i < $total; $i++)
 	{
@@ -9635,7 +9671,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	$mail->IsSMTP();
 	$mail->SMTPKeepAlive = false;
 	$mail->SMTPAuth = true;
-	$mail->Timeout = $use_socks ? 8 : 30;
+	$mail->Timeout = $use_socks ? 8 : 12;
 	$mail->SMTPDebug = 0;
 	if(!smtp_pick_next($curentsmtp - 1 < 0 ? -1 : $curentsmtp - 1)) exit(1);
 	smtp_apply_current(false);
@@ -10225,7 +10261,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	// Fresh connect each mail when rotating SMTPs (avoids connect() failed)
 	$mail->SMTPKeepAlive = (count($allsmtps) <= 1);
 	$mail->SMTPAuth = true;
-	$mail->Timeout = $use_socks ? 8 : 30;
+	$mail->Timeout = $use_socks ? 8 : 12;
 	$curentsmtp = 0;
 	if(!smtp_pick_next(-1))
 	{
