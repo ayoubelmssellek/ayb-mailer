@@ -3,12 +3,18 @@
 
 /validmails.txt
 /validmails_smtp.txt
+/validmails_*.txt
 /mailssenddone.txt
 /mailssenddone_smtp.txt
+/mailssenddone_*.txt
 /mail_queue_progress.json
 /mail_queue_progress_smtp.json
+/mail_queue_progress_*.json
+/send_country.txt
 /pending_emails.txt
 /failed_emails.txt
+/smtp_blocked.txt
+/smtp_blocked.txt.lock
 /send_queue_lane.txt
 /dash_live_state.json
 /active_campaign.txt

@@ -2,6 +2,7 @@
 /**
  * Dashboard: manage validmails.txt (paste or upload). Never auto-deletes lines.
  */
+require_once __DIR__.DIRECTORY_SEPARATOR.'queue_country.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -101,24 +102,14 @@ function mq_progress_snapshot($list, $donePath, $progPath, $phase, $validName, $
 }
 
 $lane = (isset($_POST['lane']) && $_POST['lane'] === 'smtp') ? 'smtp' : 'api';
-if($lane === 'smtp')
-{
-	$validPath = __DIR__.DIRECTORY_SEPARATOR.'validmails_smtp.txt';
-	$donePath = __DIR__.DIRECTORY_SEPARATOR.'mailssenddone_smtp.txt';
-	$progPath = __DIR__.DIRECTORY_SEPARATOR.'mail_queue_progress_smtp.json';
-	$validName = 'validmails_smtp.txt';
-	$doneName = 'mailssenddone_smtp.txt';
-	$listLabel = 'Normal SMTP list';
-}
-else
-{
-	$validPath = __DIR__.DIRECTORY_SEPARATOR.'validmails.txt';
-	$donePath = __DIR__.DIRECTORY_SEPARATOR.'mailssenddone.txt';
-	$progPath = __DIR__.DIRECTORY_SEPARATOR.'mail_queue_progress.json';
-	$validName = 'validmails.txt';
-	$doneName = 'mailssenddone.txt';
-	$listLabel = 'Brevo campaign list';
-}
+$country = queue_country_code(isset($_POST['country']) ? $_POST['country'] : 'pt');
+$names = queue_country_files($lane, $country);
+$validPath = __DIR__.DIRECTORY_SEPARATOR.$names['valid'];
+$donePath = __DIR__.DIRECTORY_SEPARATOR.$names['done'];
+$progPath = __DIR__.DIRECTORY_SEPARATOR.$names['prog'];
+$validName = $names['valid'];
+$doneName = $names['done'];
+$listLabel = ($lane === 'smtp' ? 'Normal SMTP list' : 'Brevo campaign list').' · '.strtoupper($country);
 
 $action = isset($_POST['action']) ? trim($_POST['action']) : 'save_valid';
 

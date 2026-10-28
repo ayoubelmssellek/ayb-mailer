@@ -28,10 +28,14 @@ function dash_live_load_emails($path)
 $running = is_file($dir.DIRECTORY_SEPARATOR.'send_running.flag');
 $stopFlag = is_file($dir.DIRECTORY_SEPARATOR.'stop_send.flag');
 
+require_once $dir.DIRECTORY_SEPARATOR.'queue_country.php';
 $laneFile = $dir.DIRECTORY_SEPARATOR.'send_queue_lane.txt';
 $lane = (is_file($laneFile) && trim((string)@file_get_contents($laneFile)) === 'smtp') ? 'smtp' : 'api';
-$validName = ($lane === 'smtp') ? 'validmails_smtp.txt' : 'validmails.txt';
-$doneName = ($lane === 'smtp') ? 'mailssenddone_smtp.txt' : 'mailssenddone.txt';
+$countryFile = $dir.DIRECTORY_SEPARATOR.'send_country.txt';
+$country = queue_country_code(is_file($countryFile) ? (string)@file_get_contents($countryFile) : 'pt');
+$names = queue_country_files($lane, $country);
+$validName = $names['valid'];
+$doneName = $names['done'];
 
 $valid = dash_live_load_emails($dir.DIRECTORY_SEPARATOR.$validName);
 $done = dash_live_load_emails($dir.DIRECTORY_SEPARATOR.$doneName);
