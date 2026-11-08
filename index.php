@@ -4,6 +4,7 @@ set_time_limit(0);
 // Require autoload
 require_once 'vendor/autoload.php';
 require_once __DIR__.DIRECTORY_SEPARATOR.'brevo_status.php';
+require_once __DIR__.DIRECTORY_SEPARATOR.'brevo_analytics_lib.php';
 require_once __DIR__.DIRECTORY_SEPARATOR.'queue_country.php';
 // init faker 
 $faker = Faker\Factory::create('fr_FR');
@@ -350,6 +351,36 @@ body.send-mode .app-shell{display:none!important}
 .stats-dash .sd-msg{font-size:12px;color:#8b9bb0;margin-top:10px;min-height:16px}
 .stats-dash .sd-err{color:#ff5d6c}
 @media(max-width:900px){.stats-dash .sd-overview{grid-template-columns:1fr 1fr}.stats-dash .sd-row{grid-template-columns:1fr 56px;grid-template-rows:auto auto}.stats-dash .sd-bar{grid-column:1/-1}}
+/* Recipient-level analytics (extends stats-dash) */
+.stats-dash .sd-kpi.clickable{cursor:pointer;transition:border-color .15s,transform .12s}
+.stats-dash .sd-kpi.clickable:hover,.stats-dash .sd-kpi.clickable.on{border-color:#2ee59d;transform:translateY(-1px)}
+.stats-dash .ra-box{margin-top:18px;padding-top:16px;border-top:1px solid #273242}
+.stats-dash .ra-box h4{margin:0 0 6px;font-size:15px}
+.stats-dash .ra-box .ra-sub{font-size:12px;color:#8b9bb0;margin:0 0 12px;line-height:1.45}
+.stats-dash .ra-filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
+.stats-dash .ra-filters select,.stats-dash .ra-filters input{background:#18212c;border:1px solid #273242;color:#e8eef5;border-radius:10px;padding:8px 10px;font:inherit;font-size:12px}
+.stats-dash .ra-filters input[type=text],.stats-dash .ra-filters input[type=search]{min-width:160px}
+.stats-dash .ra-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.stats-dash .ra-table-wrap{overflow:auto;border:1px solid #273242;border-radius:12px;background:#121821}
+.stats-dash .ra-table{width:100%;border-collapse:collapse;font-size:12px;min-width:780px}
+.stats-dash .ra-table th,.stats-dash .ra-table td{padding:9px 10px;border-bottom:1px solid #243040;text-align:left;vertical-align:top}
+.stats-dash .ra-table th{color:#8b9bb0;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.35px;position:sticky;top:0;background:#18212c}
+.stats-dash .ra-table td{color:#e8eef5}
+.stats-dash .ra-table a.ra-email{color:#5eb3ff;cursor:pointer;text-decoration:none;font-weight:600}
+.stats-dash .ra-table a.ra-email:hover{text-decoration:underline}
+.stats-dash .ra-pill{display:inline-block;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}
+.stats-dash .ra-pill.ok{background:rgba(46,229,157,.15);color:#2ee59d}
+.stats-dash .ra-pill.fail{background:rgba(255,93,108,.15);color:#ff5d6c}
+.stats-dash .ra-pill.warn{background:rgba(245,158,11,.15);color:#f59e0b}
+.stats-dash .ra-pill.mute{background:rgba(139,155,176,.12);color:#8b9bb0}
+.stats-dash .ra-pager{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:#8b9bb0}
+.stats-dash .ra-hist{margin-top:12px;padding:12px;background:#121821;border:1px solid #273242;border-radius:12px;display:none}
+.stats-dash .ra-hist.on{display:block}
+.stats-dash .ra-hist h5{margin:0 0 8px;font-size:13px;color:#fff}
+.stats-dash .ra-hist ol{margin:0;padding-left:18px}
+.stats-dash .ra-hist li{margin:0 0 8px;color:#c5d0dc;line-height:1.4}
+.stats-dash .ra-sync{font-size:12px;color:#8b9bb0;margin-top:8px;line-height:1.45}
+@media(max-width:900px){.stats-dash .ra-filters input[type=text],.stats-dash .ra-filters input[type=search]{min-width:120px}}
 body.send-mode{margin:0;background:var(--bg);color:var(--text);font-family:"DM Sans",system-ui,sans-serif}
 .send-dash{position:sticky;top:0;z-index:9999;background:linear-gradient(180deg,#101820 0%,#0d131a 100%);color:var(--text);border-bottom:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.45)}
 .send-dash *{box-sizing:border-box}
@@ -1461,6 +1492,284 @@ document.addEventListener('DOMContentLoaded', function(){
     brevoLoadStats();
   };
 
+  // —— Recipient-level analytics (local SQLite + Brevo transactional events) ——
+  window.__raPage=1;
+  window.__raPages=1;
+  function raApiBase(file){
+    var p=location.pathname||'';
+    var i=p.lastIndexOf('/');
+    return (i>=0?p.slice(0,i+1):'/')+file;
+  }
+  function raMsg(t, err){
+    var m=document.getElementById('ra-msg');
+    if(!m) return;
+    m.className=err?'sd-msg sd-err':'sd-msg';
+    m.textContent=t||'';
+  }
+  function raFilters(){
+    var subjSel=document.getElementById('ra-subject');
+    var camp=document.getElementById('ra-campaign');
+    var campVal=camp?camp.value:'';
+    var campId='', campName='';
+    if(campVal){
+      if(campVal.indexOf('id:')===0) campId=campVal.slice(3);
+      else if(campVal.indexOf('name:')===0) campName=campVal.slice(5);
+    }
+    return {
+      status:(document.getElementById('ra-status')||{}).value||'all',
+      subject:subjSel&&subjSel.value?subjSel.value:'',
+      subject_q:(document.getElementById('ra-subject-q')||{}).value||'',
+      campaign_id:campId,
+      campaign_name:campName,
+      start_date:(document.getElementById('ra-start')||{}).value||'',
+      end_date:(document.getElementById('ra-end')||{}).value||'',
+      email:(document.getElementById('ra-email')||{}).value||'',
+      page:window.__raPage||1,
+      per_page:50
+    };
+  }
+  function raStatusPill(st){
+    st=String(st||'');
+    var cls='mute';
+    if(st==='delivered'||st==='opened'||st==='clicked'||st==='uniqueOpened') cls='ok';
+    else if(st==='hardBounce'||st==='invalid'||st==='blocked'||st==='error'||st==='spam') cls='fail';
+    else if(st==='softBounce'||st==='deferred'||st==='bounced') cls='warn';
+    return '<span class="ra-pill '+cls+'">'+sdEsc(st)+'</span>';
+  }
+  function raFillKpis(c){
+    c=c||{};
+    var set=function(id,v){ var e=document.getElementById(id); if(e) e.textContent=(v!=null?v:'—'); };
+    set('ra-kpi-delivered', c.delivered);
+    set('ra-kpi-hard', c.hardBounce);
+    set('ra-kpi-soft', c.softBounce);
+    set('ra-kpi-bounced', c.bounced);
+    set('ra-kpi-total', c.total_messages);
+  }
+  function raRenderRows(rows){
+    var tb=document.getElementById('ra-tbody');
+    if(!tb) return;
+    if(!rows||!rows.length){
+      tb.innerHTML='<tr><td colspan="7" style="color:#8b9bb0">No recipient records for this filter. Run Sync Brevo Recipient Data.</td></tr>';
+      return;
+    }
+    var html='';
+    rows.forEach(function(r){
+      var subj=r.subject_available==1||r.subject_available==='1'?r.subject:'(unavailable)';
+      var camp=(r.campaign_name||r.campaign_id||'—');
+      html+='<tr>'
+        +'<td><a class="ra-email" data-email="'+sdEsc(r.recipient_email)+'">'+sdEsc(r.recipient_email)+'</a></td>'
+        +'<td>'+sdEsc(subj)+'</td>'
+        +'<td>'+raStatusPill(r.current_status)+'</td>'
+        +'<td>'+sdEsc(camp)+'</td>'
+        +'<td>'+sdEsc(r.send_date||'—')+'</td>'
+        +'<td>'+sdEsc(r.event_date||'—')+'</td>'
+        +'<td>'+sdEsc(r.bounce_reason||'')+'</td>'
+        +'</tr>';
+    });
+    tb.innerHTML=html;
+  }
+  function raLoadSubjectsCampaigns(){
+    var text=document.getElementById('brevo_api_keys');
+    // subjects/campaigns come from local DB — no keys needed
+    fetch(raApiBase('brevo_recipients.php'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'subjects'}),cache:'no-store'})
+      .then(function(r){return r.json();}).then(function(d){
+        var sel=document.getElementById('ra-subject');
+        if(!sel||!d||!d.ok) return;
+        var cur=sel.value;
+        var html='<option value="">All subjects</option>';
+        (d.subjects||[]).forEach(function(s){
+          html+='<option value="'+sdEsc(s.subject)+'">'+sdEsc(s.subject)+' ('+s.c+')</option>';
+        });
+        sel.innerHTML=html;
+        if(cur) sel.value=cur;
+      }).catch(function(){});
+    fetch(raApiBase('brevo_recipients.php'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'campaigns'}),cache:'no-store'})
+      .then(function(r){return r.json();}).then(function(d){
+        var sel=document.getElementById('ra-campaign');
+        if(!sel||!d||!d.ok) return;
+        var cur=sel.value;
+        var html='<option value="">All campaigns</option>';
+        (d.campaigns||[]).forEach(function(c){
+          if(c.campaign_id) html+='<option value="id:'+sdEsc(c.campaign_id)+'">'+sdEsc(c.campaign_name||c.campaign_id)+' ('+c.c+')</option>';
+          else if(c.campaign_name) html+='<option value="name:'+sdEsc(c.campaign_name)+'">'+sdEsc(c.campaign_name)+' ('+c.c+')</option>';
+        });
+        sel.innerHTML=html;
+        if(cur) sel.value=cur;
+      }).catch(function(){});
+  }
+  function raLoadList(){
+    var f=raFilters();
+    f.action='list';
+    raMsg('Loading recipients…');
+    fetch(raApiBase('brevo_recipients.php'),{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(f),cache:'no-store'
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ raMsg((d&&d.err)||'Load failed', true); return; }
+      raFillKpis(d.counts||{});
+      raRenderRows(d.rows||[]);
+      window.__raPage=d.page||1;
+      window.__raPages=d.pages||1;
+      var meta=document.getElementById('ra-pager-meta');
+      if(meta) meta.textContent=(d.total||0)+' messages · '+(d.unique_emails||0)+' unique emails';
+      var lab=document.getElementById('ra-page-label');
+      if(lab) lab.textContent='Page '+(d.page||1)+' / '+(d.pages||1);
+      var sm=document.getElementById('ra-sync-msg');
+      if(sm && d.sync){
+        var lr=d.sync.last_run;
+        var cfg=d.sync.config_last_sync;
+        if(lr) sm.textContent='Last sync run #'+lr.id+' · '+lr.status+' · retrieved '+lr.total_retrieved+' · new '+lr.new_imported+' · skipped '+lr.existing_skipped+' · failed '+lr.failed+' · range '+lr.start_date+' → '+lr.end_date+(lr.finished_at?' · '+lr.finished_at:'');
+        else if(cfg&&cfg.at) sm.textContent='Last successful sync '+cfg.at+' · range '+(cfg.start_date||'')+' → '+(cfg.end_date||'');
+      }
+      raMsg('Loaded '+(d.total||0)+' message record(s).');
+      var st=f.status||'all';
+      var kpis=document.querySelectorAll('#ra-kpis .sd-kpi');
+      for(var i=0;i<kpis.length;i++) kpis[i].classList.toggle('on', kpis[i].getAttribute('data-ra-status')===st);
+    }).catch(function(e){ raMsg('Request failed'+(e&&e.message?(' — '+e.message):''), true); });
+  }
+  function raShowHistory(email){
+    var box=document.getElementById('ra-history');
+    if(!box) return;
+    box.className='ra-hist on';
+    box.innerHTML='<h5>'+sdEsc(email)+'</h5><div class="sd-note">Loading history…</div>';
+    fetch(raApiBase('brevo_recipients.php'),{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'history', email:email}),cache:'no-store'
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ box.innerHTML='<h5>'+sdEsc(email)+'</h5><div class="sd-err">'+(d&&d.err?d.err:'Failed')+'</div>'; return; }
+      var html='<h5>'+sdEsc(email)+' · '+(d.count||0)+' message(s)</h5><ol>';
+      (d.messages||[]).forEach(function(m, idx){
+        var subj=m.subject_available==1||m.subject_available==='1'?m.subject:'(unavailable)';
+        html+='<li><b>'+sdEsc(subj)+'</b> — '+raStatusPill(m.current_status)
+          +' · '+(sdEsc(m.send_date||m.event_date||''))
+          +(m.bounce_reason?(' · '+sdEsc(m.bounce_reason)):'')
+          +(m.brevo_message_id?(' · <span style="color:#8b9bb0">'+sdEsc(m.brevo_message_id)+'</span>'):'')
+          +'</li>';
+      });
+      html+='</ol><button type="button" class="sd-btn" id="ra-hist-close">Close</button>';
+      box.innerHTML=html;
+      var c=document.getElementById('ra-hist-close');
+      if(c) c.onclick=function(){ box.className='ra-hist'; box.innerHTML=''; };
+    }).catch(function(e){ box.innerHTML='<div class="sd-err">'+sdEsc(e&&e.message?e.message:'error')+'</div>'; });
+  }
+  function raExport(preset){
+    var f=raFilters();
+    if(preset && preset!=='current'){ f.status=preset; f.preset=preset; }
+    else f.preset='';
+    // POST via form to trigger download without exposing API keys
+    var form=document.createElement('form');
+    form.method='POST';
+    form.action=raApiBase('brevo_recipients_export.php');
+    form.target='_blank';
+    Object.keys(f).forEach(function(k){
+      if(f[k]===''||f[k]==null) return;
+      var inp=document.createElement('input');
+      inp.type='hidden'; inp.name=k; inp.value=f[k];
+      form.appendChild(inp);
+    });
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  }
+  function raSync(){
+    var ta=document.getElementById('brevo_api_keys');
+    var text=ta?(ta.value||''):'';
+    if(!text.trim()){ raMsg('Add at least one API account on Setup first.', true); return; }
+    var daysEl=document.getElementById('brevo-stats-days');
+    var days=daysEl?parseInt(daysEl.value,10):90;
+    if(!days||days<1) days=90;
+    if(days>90) days=90;
+    var pub=(document.getElementById('ra-public-url')||{}).value||'';
+    var weekly=!!(document.getElementById('ra-weekly-export')&&document.getElementById('ra-weekly-export').checked);
+    var btn=document.getElementById('ra-btn-sync');
+    if(btn){ btn.disabled=true; btn.textContent='Syncing…'; }
+    raMsg('Syncing Brevo transactional events (max 90 days)…');
+    fetch(raApiBase('brevo_recipients_sync.php'),{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:text, days:days, weekly_export:weekly, public_base_url:pub}),
+      cache:'no-store'
+    }).then(function(r){return r.json();}).then(function(d){
+      if(btn){ btn.disabled=false; btn.textContent='Sync Brevo Recipient Data'; }
+      if(!d||!d.ok){ raMsg((d&&d.err)||'Sync failed', true); return; }
+      var t=d.totals||{};
+      raMsg('Sync OK · retrieved '+t.retrieved+' · new '+t.imported+' · skipped '+t.skipped+' · failed '+t.failed+' · range '+(d.date_range&&d.date_range.start)+' → '+(d.date_range&&d.date_range.end));
+      var sm=document.getElementById('ra-sync-msg');
+      if(sm && d.limitations){
+        sm.textContent='Coverage: events ≤90d; weekly export ≤7d; '+((d.limitations&&d.limitations.subjects)||'');
+      }
+      raLoadSubjectsCampaigns();
+      raLoadList();
+    }).catch(function(e){
+      if(btn){ btn.disabled=false; btn.textContent='Sync Brevo Recipient Data'; }
+      raMsg('Sync request failed'+(e&&e.message?(' — '+e.message):''), true);
+    });
+  }
+  function raWebhook(action){
+    var ta=document.getElementById('brevo_api_keys');
+    var text=ta?(ta.value||''):'';
+    var pub=(document.getElementById('ra-public-url')||{}).value||'';
+    raMsg(action==='create'?'Creating/reusing Brevo webhooks…':'Loading webhook status…');
+    fetch(raApiBase('brevo_webhook_setup.php'),{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:action==='create'?'create':(pub?'save_url':'status'), text:text, public_base_url:pub}),
+      cache:'no-store'
+    }).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ raMsg((d&&d.err)||'Webhook call failed', true); return; }
+      if(action==='create'){
+        var okN=(d.accounts||[]).filter(function(a){return a.ok;}).length;
+        raMsg('Webhooks · '+okN+'/'+(d.accounts||[]).length+' accounts · URL '+(d.webhook_url||''));
+      } else {
+        if(pub){
+          // after save, fetch status
+          return fetch(raApiBase('brevo_webhook_setup.php'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'status'}),cache:'no-store'}).then(function(r){return r.json();});
+        }
+        raMsg('Webhook URL: '+(d.webhook_url||'(set public HTTPS base URL)')+' · can_create='+(d.can_create?'yes':'no'));
+      }
+      return d;
+    }).then(function(d){
+      if(d&&d.webhook_url) raMsg('Webhook URL: '+d.webhook_url+' · type '+(d.webhook_type||'transactional')+' · can_create='+(d.can_create?'yes':'no'));
+    }).catch(function(e){ raMsg('Webhook request failed'+(e&&e.message?(' — '+e.message):''), true); });
+  }
+  (function initRa(){
+    var apply=document.getElementById('ra-btn-apply');
+    if(apply) apply.onclick=function(){ window.__raPage=1; raLoadList(); };
+    var sync=document.getElementById('ra-btn-sync');
+    if(sync) sync.onclick=raSync;
+    var prev=document.getElementById('ra-prev');
+    if(prev) prev.onclick=function(){ if(window.__raPage>1){ window.__raPage--; raLoadList(); } };
+    var next=document.getElementById('ra-next');
+    if(next) next.onclick=function(){ if(window.__raPage<window.__raPages){ window.__raPage++; raLoadList(); } };
+    var kpis=document.getElementById('ra-kpis');
+    if(kpis) kpis.onclick=function(ev){
+      var t=ev.target; while(t&&t!==kpis&&!t.getAttribute('data-ra-status')) t=t.parentNode;
+      if(!t||!t.getAttribute) return;
+      var st=t.getAttribute('data-ra-status');
+      if(!st) return;
+      var sel=document.getElementById('ra-status');
+      if(sel) sel.value=st;
+      window.__raPage=1;
+      raLoadList();
+    };
+    var tb=document.getElementById('ra-tbody');
+    if(tb) tb.onclick=function(ev){
+      var t=ev.target;
+      if(t&&t.classList&&t.classList.contains('ra-email')){
+        ev.preventDefault();
+        raShowHistory(t.getAttribute('data-email')||t.textContent);
+      }
+    };
+    var acts=document.querySelectorAll('[data-ra-export]');
+    for(var i=0;i<acts.length;i++){
+      (function(btn){ btn.onclick=function(){ raExport(btn.getAttribute('data-ra-export')); }; })(acts[i]);
+    }
+    var whs=document.getElementById('ra-btn-wh-status');
+    if(whs) whs.onclick=function(){ raWebhook('status'); };
+    var whc=document.getElementById('ra-btn-wh-create');
+    if(whc) whc.onclick=function(){ raWebhook('create'); };
+    // Auto-load local rows when analytics page is opened
+    setTimeout(function(){ raLoadSubjectsCampaigns(); raLoadList(); }, 400);
+  })();
+
   function mqMsg(t, ok, lane){
     var m=document.getElementById(lane==='smtp'?'mail-queue-msg-smtp':'mail-queue-msg');
     if(!m) return;
@@ -2001,6 +2310,84 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="sd-local" id="brevo-stats-local" style="display:none"></div>
       </div>
       <div class="sd-msg" id="brevo-stats-msg"></div>
+
+      <div class="ra-box" id="brevo-recipient-analytics">
+        <h4>Recipient-level analytics</h4>
+        <p class="ra-sub">Transactional sends (<code>POST /v3/smtp/email</code>). Click a KPI card to filter. Each row is one message (same address can appear many times with different subjects). Subjects marked <b>(unavailable)</b> could not be recovered from Brevo for that event.</p>
+        <div class="sd-overview" id="ra-kpis" style="grid-template-columns:repeat(5,1fr)">
+          <div class="sd-kpi ok clickable" data-ra-status="delivered"><b id="ra-kpi-delivered">—</b><span>Delivered msgs</span></div>
+          <div class="sd-kpi fail clickable" data-ra-status="hardBounce"><b id="ra-kpi-hard">—</b><span>Hard bounces</span></div>
+          <div class="sd-kpi fail clickable" data-ra-status="softBounce" style="border-color:#5a4030"><b id="ra-kpi-soft" style="color:#f59e0b">—</b><span>Soft bounces</span></div>
+          <div class="sd-kpi fail clickable" data-ra-status="bounced"><b id="ra-kpi-bounced">—</b><span>All bounced</span></div>
+          <div class="sd-kpi info clickable" data-ra-status="all"><b id="ra-kpi-total">—</b><span>Tracked messages</span></div>
+        </div>
+        <div class="ra-filters">
+          <select id="ra-status" title="Status">
+            <option value="all">All statuses</option>
+            <option value="delivered">Delivered</option>
+            <option value="hardBounce">Hard Bounced</option>
+            <option value="softBounce">Soft Bounced</option>
+            <option value="bounced">All Bounced</option>
+            <option value="sent">Sent</option>
+            <option value="deferred">Deferred</option>
+            <option value="opened">Opened</option>
+            <option value="clicked">Clicked</option>
+            <option value="spam">Spam</option>
+            <option value="invalid">Invalid Email</option>
+            <option value="blocked">Blocked</option>
+            <option value="unsubscribed">Unsubscribed</option>
+            <option value="error">Error</option>
+          </select>
+          <select id="ra-subject" title="Subject"><option value="">All subjects</option></select>
+          <input type="search" id="ra-subject-q" placeholder="Search subject…" title="Subject contains">
+          <select id="ra-campaign" title="Campaign"><option value="">All campaigns</option></select>
+          <input type="date" id="ra-start" title="Start date">
+          <input type="date" id="ra-end" title="End date">
+          <input type="search" id="ra-email" placeholder="Recipient email…" title="Email search">
+          <button type="button" class="sd-btn" id="ra-btn-apply">Apply filters</button>
+          <button type="button" class="sd-btn" id="ra-btn-sync">Sync Brevo Recipient Data</button>
+        </div>
+        <div class="ra-actions">
+          <button type="button" class="sd-btn" data-ra-export="delivered">Export Delivered</button>
+          <button type="button" class="sd-btn" data-ra-export="hardBounce">Export Hard Bounce</button>
+          <button type="button" class="sd-btn" data-ra-export="softBounce">Export Soft Bounce</button>
+          <button type="button" class="sd-btn" data-ra-export="bounced">Export All Bounced</button>
+          <button type="button" class="sd-btn" data-ra-export="current">Export Current Filter</button>
+          <button type="button" class="sd-btn" id="ra-btn-wh-status">Webhook status</button>
+          <button type="button" class="sd-btn" id="ra-btn-wh-create">Setup webhooks</button>
+        </div>
+        <div class="ra-table-wrap">
+          <table class="ra-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Subject</th>
+                <th>Status</th>
+                <th>Campaign</th>
+                <th>Send date</th>
+                <th>Event date</th>
+                <th>Bounce reason</th>
+              </tr>
+            </thead>
+            <tbody id="ra-tbody"><tr><td colspan="7" style="color:#8b9bb0">Load stats / sync to populate recipient rows.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="ra-pager">
+          <span id="ra-pager-meta">0 messages · 0 unique emails</span>
+          <span>
+            <button type="button" class="sd-btn" id="ra-prev">Prev</button>
+            <span id="ra-page-label" style="margin:0 8px">Page 1</span>
+            <button type="button" class="sd-btn" id="ra-next">Next</button>
+          </span>
+        </div>
+        <div class="ra-hist" id="ra-history"></div>
+        <div class="ra-sync" id="ra-sync-msg">Sync not run yet. Historical coverage: events API ≤ 90 days; weekly export ≤ 7 days; subjects from webhooks/export/local sends or /smtp/emails correlation.</div>
+        <div class="sd-msg" id="ra-msg"></div>
+        <div class="ra-filters" style="margin-top:10px">
+          <input type="url" id="ra-public-url" placeholder="https://your-public-host/.../ayb-mailer" title="Public HTTPS base URL for webhooks" style="min-width:280px;flex:1">
+          <label style="font-size:12px;color:#8b9bb0;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ra-weekly-export"> Also request 7-day weekly export</label>
+        </div>
+      </div>
     </div>
   </section>
   <section class="setup-card mode-hide-api" style="<?php if($smtp_mode==='brevo_api') echo 'display:none'; ?>">
@@ -9163,6 +9550,9 @@ function brevo_api_send_email($apiKey, $toEmail, $fromEmail, $fromName, $subject
 	{
 		$out['ok'] = true;
 		if(is_array($json) && !empty($json['messageId'])) $out['id'] = $json['messageId'];
+		// Persist recipient-level send locally (subject + messageId) for analytics correlation
+		if(function_exists('ba_record_local_send'))
+			ba_record_local_send($apiKey, $toEmail, (string)$subject, $out['id'], $fromEmail);
 		return $out;
 	}
 	$msg = '';

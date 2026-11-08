@@ -40,6 +40,13 @@
 /campaigns/
 /conf/
 /vendor/
+/data/brevo_analytics.sqlite
+/data/brevo_analytics.sqlite-*
+/data/brevo_analytics_config.json
+/data/brevo_analytics_selftest.sqlite
+/data/brevo_analytics_selftest_config.json
+/data/tmp/
+/data/exports/
 
 .DS_Store
 *.log
