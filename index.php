@@ -3,9 +3,10 @@
 set_time_limit(0);
 // Require autoload
 require_once 'vendor/autoload.php';
-require_once __DIR__.DIRECTORY_SEPARATOR.'brevo_status.php';
-require_once __DIR__.DIRECTORY_SEPARATOR.'brevo_analytics_lib.php';
+require_once __DIR__.DIRECTORY_SEPARATOR.'env_load.php';
+require_once __DIR__.DIRECTORY_SEPARATOR.'sendgrid_mail.php';
 require_once __DIR__.DIRECTORY_SEPARATOR.'queue_country.php';
+ayb_env_load();
 // init faker 
 $faker = Faker\Factory::create('fr_FR');
 //INIT VARS
@@ -76,64 +77,28 @@ if(!empty($_POST))
 	$repaslog=true;
 	if(!empty($_POST['use_socks']) || (isset($_POST['use_socks_persist']) && $_POST['use_socks_persist'] === '1'))
 	$use_socks=true;
-	if(!empty($_POST['smtp_mode']) && $_POST['smtp_mode'] === 'brevo_api')
-	$smtp_mode = 'brevo_api';
-	else if(!empty($_POST['smtp_mode']) && $_POST['smtp_mode'] === 'brevo')
-	$smtp_mode = 'brevo';
+	// Cloud API = Twilio SendGrid REST only. Legacy Brevo modes are rejected (no fallback).
+	if(!empty($_POST['smtp_mode']) && ($_POST['smtp_mode'] === 'sendgrid' || $_POST['smtp_mode'] === 'brevo_api'))
+	$smtp_mode = 'sendgrid';
+	else if(!empty($_POST['smtp_mode']) && ($_POST['smtp_mode'] === 'brevo' || $_POST['smtp_mode'] === 'brevo_smtp'))
+	{
+		header('Content-Type: text/plain; charset=utf-8');
+		echo "Brevo has been removed. Use SendGrid API mode (SENDGRID_API_KEY in .env) or Normal SMTP.";
+		exit;
+	}
 	else
 	$smtp_mode = 'normal';
-	if(!empty($_POST['brevo_smtp']))
-	$brevo_smtp = lrtrim($_POST['brevo_smtp']);
-	if(!empty($_POST['brevo_api_keys']))
-	$brevo_api_keys = lrtrim($_POST['brevo_api_keys']);
-	else if(!empty($_POST['brevo_api_key']))
-	$brevo_api_keys = lrtrim($_POST['brevo_api_key']); // old single-field compat
-	// Brevo SMTP / API: no SOCKS
-	if($smtp_mode === 'brevo')
-	{
-	$use_socks = false;
-	$send_workers = 1;
-	$parsed = parse_brevo_smtp_blocks($brevo_smtp);
-	$allsmtps = $parsed['allsmtps'];
-	$smtp_accounts = $parsed['accounts'];
-	$smtp_account_of = $parsed['account_of'];
-	$account_sent = array();
-	$wantN = isset($_POST['brevo_use_count']) ? intval($_POST['brevo_use_count']) : 10;
-	if($wantN < 1 || $wantN > 10) $wantN = 10;
-	if(count($smtp_accounts) > $wantN)
-	{
-		$smtp_accounts = array_values(array_slice($smtp_accounts, 0, $wantN));
-		$kept = array();
-		$newAccounts = array();
-		$newOf = array();
-		foreach($smtp_accounts as $acc)
-		{
-			$idxs = array();
-			foreach($acc['indices'] as $oldIdx)
-			{
-				if(!isset($allsmtps[$oldIdx])) continue;
-				$newOf[count($kept)] = count($newAccounts);
-				$idxs[] = count($kept);
-				$kept[] = $allsmtps[$oldIdx];
-			}
-			$acc['indices'] = $idxs;
-			$newAccounts[] = $acc;
-		}
-		$allsmtps = $kept;
-		$smtp_accounts = $newAccounts;
-		$smtp_account_of = $newOf;
-	}
-	}
-	else if($smtp_mode === 'brevo_api')
+	if($smtp_mode === 'sendgrid')
 	{
 	$use_socks = false;
 	$send_workers = 1;
 	$allsmtps = array();
-	$brevo_api_accounts = parse_brevo_api_blocks($brevo_api_keys);
-	$brevo_api_sent = array();
-	$brevo_api_cur = 0;
-	$wantN = isset($_POST['brevo_use_count']) ? intval($_POST['brevo_use_count']) : 10;
-	if($wantN < 1 || $wantN > 10) $wantN = 10;
+	$sgCfg = sendgrid_config();
+	if($from === '' || strpos($from, '@') === false) $from = $sgCfg['from_email'];
+	if($from_base === '' || strpos($from_base, '@') === false) $from_base = $sgCfg['from_email'];
+	if($realname === '') $realname = $sgCfg['from_name'];
+	if($realname_base === '') $realname_base = $sgCfg['from_name'];
+	if($replyto === '') $replyto = $sgCfg['reply_to'];
 	}
 	else
 	{
@@ -155,7 +120,7 @@ if(!empty($_POST))
 			$my_smtp = implode("\n", $allsmtps);
 	}
 	}
-	// Method 1 (Normal SMTP) uses its own list. Brevo API / Brevo SMTP keep validmails.txt.
+	// Method 1 (Normal SMTP) uses its own list. SendGrid API keeps validmails.txt (api lane).
 	$mail_queue_lane = ($smtp_mode === 'normal') ? 'smtp' : 'api';
 	$send_country = queue_country_code(isset($_POST['send_country']) ? $_POST['send_country'] : 'pt');
 	@file_put_contents(__DIR__.DIRECTORY_SEPARATOR.'send_queue_lane.txt', $mail_queue_lane);
@@ -680,7 +645,7 @@ $(document).ready(function(){
   <div id="pending-banner" style="display:none;margin-bottom:14px;padding:10px 14px;border-radius:10px;background:#e8f7ef;border:1px solid #b7e4c7;color:#0d5c3a;font-size:13px;font-weight:600"></div>
 <!-- proxy panel moved into Connections page; keep marker -->
 <div id="proxy-test-panel-holder" style="display:none"></div>
-<div id="proxy-test-panel" class="setup-card mode-only-normal" style="margin-bottom:16px;<?php if($smtp_mode==='brevo'||$smtp_mode==='brevo_api') echo 'display:none'; ?>">
+<div id="proxy-test-panel" class="setup-card mode-only-normal" style="margin-bottom:16px;<?php if($smtp_mode==='sendgrid') echo 'display:none'; ?>">
   <div class="setup-proxy">
     <div>
       <h3 style="margin-bottom:6px">SOCKS Run Test</h3>
@@ -804,10 +769,10 @@ $(document).ready(function(){
   bindProxy('socks4');
 })();
 function syncSmtpMode(){
-  var brevo = document.getElementById('mode_brevo') && document.getElementById('mode_brevo').checked;
-  var brevoApi = document.getElementById('mode_brevo_api') && document.getElementById('mode_brevo_api').checked;
-  var normal = !brevo && !brevoApi;
-  var noSocks = brevo || brevoApi;
+  var brevo = false;
+  var brevoApi = document.getElementById('mode_sendgrid') && document.getElementById('mode_sendgrid').checked;
+  var normal = !brevoApi;
+  var noSocks = !!brevoApi;
   function show(el, on){
     if(!el) return;
     el.style.display = on ? '' : 'none';
@@ -849,8 +814,7 @@ function syncSmtpMode(){
   }
   var hero=document.getElementById('setup-hero-sub');
   if(hero && document.getElementById('page-setup') && document.getElementById('page-setup').classList.contains('on')){
-    if(brevoApi) hero.textContent='Brevo API — paste API accounts, From, message, list. No SMTP / SOCKS.';
-    else if(brevo) hero.textContent='Brevo SMTP — paste #ACCOUNT blocks. No SOCKS.';
+    if(brevoApi) hero.textContent='SendGrid API — key in .env (SENDGRID_API_KEY). From: notify@omnidigitalsuite.com. No SMTP / SOCKS.';
     else hero.textContent='Normal mode — SMTP list + optional SOCKS Run Test, then send.';
   }
   var apiCard=document.querySelector('.rc-list.api');
@@ -859,10 +823,149 @@ function syncSmtpMode(){
   if(smtpCard) smtpCard.classList.toggle('is-live', !!normal);
 }
 document.addEventListener('DOMContentLoaded', function(){
-  var a=document.getElementById('mode_normal'), b=document.getElementById('mode_brevo'), c=document.getElementById('mode_brevo_api');
+  var a=document.getElementById('mode_normal'), c=document.getElementById('mode_sendgrid');
   if(a) a.onchange = syncSmtpMode;
-  if(b) b.onchange = syncSmtpMode;
   if(c) c.onchange = syncSmtpMode;
+  function refreshSendGridStatus(){
+    var box=document.getElementById('sendgrid-status-box');
+    if(!box) return;
+    fetch('sendgrid_status.php',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d){ box.textContent='Could not load SendGrid status'; return; }
+      box.innerHTML = d.ok
+        ? ('<b style="color:#2ee59d">Ready</b> · from <code>'+String(d.from_email||'')+'</code> · key '+String(d.key_preview||'')+' · SDK '+(d.sdk_loaded?'yes':'curl fallback'))
+        : ('<b style="color:#ff5d6c">Not ready</b> — '+String(d.err||'configure .env'));
+    }).catch(function(){ box.textContent='SendGrid status request failed'; });
+  }
+  var btnSg=document.getElementById('btn-sendgrid-status');
+  if(btnSg) btnSg.onclick=refreshSendGridStatus;
+  refreshSendGridStatus();
+
+  // —— SendGrid API analytics (local SQLite after polling sync; no webhooks) ——
+  window.__sgMsgPage=1;
+  function sgEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function sgDaysPayload(){
+    var daysEl=document.getElementById('sg-stats-days');
+    var startEl=document.getElementById('sg-stats-start');
+    var endEl=document.getElementById('sg-stats-end');
+    var payload={action:'summary', days: daysEl?parseInt(daysEl.value,10)||7:7};
+    if(startEl && endEl && startEl.value && endEl.value){
+      payload.start_date=startEl.value;
+      payload.end_date=endEl.value;
+    }
+    return payload;
+  }
+  function sgSetNum(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
+  function sgRenderDash(d){
+    var m=(d && d.metrics)||{};
+    sgSetNum('sg-requests', m.requests);
+    sgSetNum('sg-processed', m.processed);
+    sgSetNum('sg-delivered', m.delivered);
+    sgSetNum('sg-bounces', m.bounces);
+    sgSetNum('sg-deferred', m.deferred);
+    sgSetNum('sg-opens', m.opens);
+    sgSetNum('sg-clicks', m.clicks);
+    var credits='—';
+    if(d && d.credits && d.credits.remain!=null) credits=String(d.credits.remain)+(d.credits.total!=null?(' / '+d.credits.total):'');
+    sgSetNum('sg-credits', credits);
+    var sc=d && d.suppression_counts?d.suppression_counts:{};
+    sgSetNum('sg-supp-bounce', sc.bounce!=null?sc.bounce:0);
+    sgSetNum('sg-supp-spam', sc.spamreport!=null?sc.spamreport:0);
+    sgSetNum('sg-supp-block', sc.block!=null?sc.block:0);
+    sgSetNum('sg-supp-invalid', sc.invalid!=null?sc.invalid:0);
+    sgSetNum('sg-supp-unsub', sc.unsubscribe!=null?sc.unsubscribe:0);
+    var rg=document.getElementById('sg-stats-range');
+    if(rg) rg.textContent=(d.start_date||'')+' → '+(d.end_date||'')+(d.last_sync_at?(' · last sync '+d.last_sync_at):' · not synced yet');
+    var metrics=document.getElementById('sg-stats-metrics');
+    if(metrics){
+      metrics.innerHTML='Spam reports: <b>'+sgEsc(m.spam_reports||0)+'</b> · Unsubscribes: <b>'+sgEsc(m.unsubscribes||0)+'</b> · Invalid: <b>'+sgEsc(m.invalid_emails||0)+'</b> · Blocks: <b>'+sgEsc(m.blocks||0)+'</b> · Bounce drops: <b>'+sgEsc(m.bounce_drops||0)+'</b> · Unique opens/clicks: <b>'+sgEsc(m.unique_opens||0)+'</b>/<b>'+sgEsc(m.unique_clicks||0)+'</b>';
+    }
+    var caps=document.getElementById('sg-caps');
+    if(caps && d.capabilities){
+      var lines=[];
+      Object.keys(d.capabilities).forEach(function(k){
+        var c=d.capabilities[k];
+        lines.push('<div><code>'+sgEsc(k)+'</code> — '+(c.available?'<span style="color:#2ee59d">available</span>':'<span style="color:#ff5d6c">unavailable</span>')+' (HTTP '+sgEsc(c.http_code)+')'+(c.note?(' · '+sgEsc(c.note)):'')+'</div>');
+      });
+      if(d.messages_available===false) lines.push('<div><b>Email Activity:</b> unavailable — message table shows local ledger only.</div>');
+      if(d.messages_truncated) lines.push('<div><b>Warning:</b> Email Activity hit the 1000-row query cap; results may be incomplete for this range.</div>');
+      lines.push('<div>Mode: API polling (not real-time). Storage: local SQLite.</div>');
+      caps.innerHTML=lines.join('')||'Capabilities unknown — run Sync.';
+    }
+  }
+  function sgLoadLocal(){
+    var msg=document.getElementById('sg-stats-msg');
+    var payload=sgDaysPayload();
+    payload.action='summary';
+    if(msg) msg.textContent='Loading local SendGrid cache…';
+    return fetch('sendgrid_sync.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),cache:'no-store'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(!d || !d.ok){ if(msg) msg.textContent=(d&&d.err)||'Load failed'; return; }
+        sgRenderDash(d);
+        if(msg) msg.textContent=d.last_sync_at?('Local cache · last sync '+d.last_sync_at):'Local cache empty — click Sync from SendGrid';
+        sgLoadMessages();
+      })
+      .catch(function(){ if(msg) msg.textContent='Load request failed'; });
+  }
+  function sgSyncNow(){
+    var msg=document.getElementById('sg-stats-msg');
+    var btn=document.getElementById('btn-sg-sync');
+    var payload=sgDaysPayload();
+    payload.action='sync';
+    if(btn) btn.disabled=true;
+    if(msg) msg.textContent='Syncing from SendGrid APIs (polling)…';
+    return fetch('sendgrid_sync.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),cache:'no-store'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(btn) btn.disabled=false;
+        if(!d || !d.ok){ if(msg) msg.textContent=(d&&d.err)||'Sync failed'; return; }
+        if(msg){
+          var parts=['Sync OK (not real-time)'];
+          if(d.stats) parts.push('stats days '+d.stats.upserted);
+          if(d.messages) parts.push('messages '+d.messages.upserted+(d.messages.unavailable?' (unavailable)':(d.messages.truncated?' (truncated@1000)':'')));
+          parts.push('at '+(d.last_sync_at||''));
+          msg.textContent=parts.join(' · ');
+        }
+        return sgLoadLocal();
+      })
+      .catch(function(){ if(btn) btn.disabled=false; if(msg) msg.textContent='Sync request failed'; });
+  }
+  function sgLoadMessages(){
+    var tb=document.getElementById('sg-msg-tbody');
+    var note=document.getElementById('sg-msg-note');
+    var st=document.getElementById('sg-msg-status');
+    var em=document.getElementById('sg-msg-email');
+    var page=window.__sgMsgPage||1;
+    var body={action:'messages', page:page, per_page:50, status:(st&&st.value)||'all', email:(em&&em.value)||''};
+    fetch('sendgrid_sync.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(!tb) return;
+        var rows=(d && d.result && d.result.rows)||[];
+        if(!rows.length){
+          tb.innerHTML='<tr><td colspan="7" style="color:#8b9bb0">No message rows in local DB for this filter.</td></tr>';
+        } else {
+          tb.innerHTML=rows.map(function(r){
+            return '<tr><td>'+sgEsc(r.to_email)+'</td><td>'+sgEsc(r.subject)+'</td><td>'+sgEsc(r.status)+'</td><td>'+sgEsc(r.opens_count)+'</td><td>'+sgEsc(r.clicks_count)+'</td><td>'+sgEsc(r.last_event_time)+'</td><td>'+sgEsc(r.source)+'</td></tr>';
+          }).join('');
+        }
+        var pl=document.getElementById('sg-msg-page');
+        if(pl && d.result) pl.textContent='Page '+d.result.page+' · '+d.result.total+' messages';
+        if(note) note.textContent=d.note||'';
+      })
+      .catch(function(){ if(note) note.textContent='Message query failed'; });
+  }
+  var btnSgLoad=document.getElementById('btn-sg-load');
+  if(btnSgLoad) btnSgLoad.onclick=sgLoadLocal;
+  var btnSgSync=document.getElementById('btn-sg-sync');
+  if(btnSgSync) btnSgSync.onclick=sgSyncNow;
+  var btnSgApply=document.getElementById('sg-msg-apply');
+  if(btnSgApply) btnSgApply.onclick=function(){ window.__sgMsgPage=1; sgLoadMessages(); };
+  var btnSgPrev=document.getElementById('sg-msg-prev');
+  if(btnSgPrev) btnSgPrev.onclick=function(){ window.__sgMsgPage=Math.max(1,(window.__sgMsgPage||1)-1); sgLoadMessages(); };
+  var btnSgNext=document.getElementById('sg-msg-next');
+  if(btnSgNext) btnSgNext.onclick=function(){ window.__sgMsgPage=(window.__sgMsgPage||1)+1; sgLoadMessages(); };
+  sgLoadLocal();
   // Move SOCKS test panel into Connections page (keeps IDs / scripts working)
   var proxyPanel=document.getElementById('proxy-test-panel');
   var proxySlot=document.getElementById('connections-proxy-slot');
@@ -875,7 +978,7 @@ document.addEventListener('DOMContentLoaded', function(){
     setup:{title:'Setup', sub:'Mode, accounts, and SOCKS — everything to connect'},
     recipients:{title:'Recipients', sub:'The highlighted list is the one Send uses'},
     compose:{title:'Compose', sub:'Write the email, set pace, then send'},
-    analytics:{title:'Analytics', sub:'Brevo stats and domain authentication'}
+    analytics:{title:'Analytics', sub:'SendGrid API sync (local SQLite, not real-time)'}
   };
   // Map old empty pages → dense ones
   var PAGE_ALIAS={mode:'setup', connections:'setup', message:'compose', send:'compose'};
@@ -1960,7 +2063,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   function clearDoneList(lane){
     lane = lane==='smtp' ? 'smtp' : 'api';
-    var which = lane==='smtp' ? 'Normal SMTP progress only' : 'Brevo campaign progress only';
+    var which = lane==='smtp' ? 'Normal SMTP progress only' : 'SendGrid API campaign progress only';
     if(!confirm('Clear sent progress ('+which+')? Next Send starts again from the top of that list.')) return;
     mqPost('clear_done', null, null, lane).then(function(d){
       if(!d||!d.ok){ mqMsg('Could not clear sent list', false, lane); return; }
@@ -2043,17 +2146,21 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
     </div>
     <div class="setup-seg" style="flex-wrap:wrap;margin-bottom:4px">
-      <label><input type="radio" name="smtp_mode" value="normal" <?php if($smtp_mode!=='brevo' && $smtp_mode!=='brevo_api') echo 'checked'; ?> id="mode_normal"> Normal + SOCKS</label>
-      <label><input type="radio" name="smtp_mode" value="brevo" <?php if($smtp_mode==='brevo') echo 'checked'; ?> id="mode_brevo"> Brevo SMTP</label>
-      <label><input type="radio" name="smtp_mode" value="brevo_api" <?php if($smtp_mode==='brevo_api') echo 'checked'; ?> id="mode_brevo_api"> Brevo API</label>
+      <label><input type="radio" name="smtp_mode" value="normal" <?php if($smtp_mode!=='sendgrid') echo 'checked'; ?> id="mode_normal"> Normal + SOCKS</label>
+      <label><input type="radio" name="smtp_mode" value="sendgrid" <?php if($smtp_mode==='sendgrid') echo 'checked'; ?> id="mode_sendgrid"> SendGrid API</label>
     </div>
   </section>
   <div id="connections-proxy-slot"></div>
   <section class="setup-card">
     <h3>Accounts</h3>
 
-    <div class="setup-field mode-only-brevo-api" id="brevo-api-box" style="margin-bottom:14px;<?php if($smtp_mode!=='brevo_api') echo 'display:none'; ?>">
-      <label>Brevo API accounts</label>
+    <div class="setup-field mode-only-brevo-api" id="sendgrid-api-box" style="margin-bottom:14px;<?php if($smtp_mode!=='sendgrid') echo 'display:none'; ?>">
+      <label>Twilio SendGrid API</label>
+      <div class="hint" style="margin:0 0 10px">Provider: <b>SendGrid REST</b> · <code>POST /v3/mail/send</code> · From <code>notify@omnidigitalsuite.com</code>. Put your API key in <code>.env</code> as <code>SENDGRID_API_KEY=</code> (never in the browser).</div>
+      <div id="sendgrid-status-box" class="sd-note">Loading SendGrid status…</div>
+      <button type="button" class="sd-btn" id="btn-sendgrid-status" style="margin-top:8px">Refresh SendGrid status</button>
+      <div style="display:none">
+      <label style="display:none">Legacy Brevo accounts (disabled)</label>
       <div class="setup-row" style="margin-bottom:8px">
         <div class="setup-field" style="margin:0">
           <label>API key</label>
@@ -2089,11 +2196,11 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <div id="brevo-key-edit-note" class="hint" style="margin:0 0 8px"></div>
       <textarea name="brevo_api_keys" id="brevo_api_keys" rows="2" style="display:none"><?php echo htmlspecialchars($brevo_api_keys); ?></textarea>
-      <div id="brevo-credits-cards" style="display:grid;gap:8px"></div>
-      <div class="hint">These Brevo accounts are shared. They are not tied to one country. On Send you choose how many of them to use for the country you picked. Creation email, password, and browser stay on the account so you can tell the logins apart.</div>
+      <div id="brevo-credits-cards" style="display:none"></div>
+      </div>
     </div>
 
-    <div class="mode-only-normal" style="<?php if($smtp_mode==='brevo'||$smtp_mode==='brevo_api') echo 'display:none'; ?>">
+    <div class="mode-only-normal" style="<?php if($smtp_mode==='sendgrid') echo 'display:none'; ?>">
     <div class="setup-row">
       <div>
         <div class="setup-field">
@@ -2160,7 +2267,7 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
     </div>
 
-    <div class="setup-field mode-only-brevo" style="<?php if($smtp_mode!=='brevo') echo 'display:none'; ?>">
+    <div class="setup-field mode-only-brevo" style="display:none">
       <label>Brevo SMTP accounts</label>
       <textarea id="brevo_smtp" name="brevo_smtp" rows="5" placeholder="#ACCOUNT 500&#10;smtp-relay.brevo.com:587:login1:pass:TLS"><?php echo htmlspecialchars($brevo_smtp); ?></textarea>
       <div class="hint">One #ACCOUNT 500 block per Brevo login. Up to 3 SMTPs share that 500/day. No SOCKS.</div>
@@ -2172,7 +2279,7 @@ document.addEventListener('DOMContentLoaded', function(){
   <section class="setup-card">
     <h3>Send to <span id="rc-country-name" style="color:var(--s-muted);font-weight:600">· Portugal</span></h3>
     <div class="rc-switch">
-      <label><input type="radio" name="send_list_mode" id="list_mode_campaign" value="campaign" checked><strong>Campaign lists</strong><em>Brevo uses the blue list. Normal SMTP uses the sand list.</em></label>
+      <label><input type="radio" name="send_list_mode" id="list_mode_campaign" value="campaign" checked><strong>Campaign lists</strong><em>SendGrid uses the blue list. Normal SMTP uses the sand list.</em></label>
       <label><input type="radio" name="send_list_mode" id="list_mode_test" value="test"><strong>Test my emails</strong><em>Only the addresses you type. Both saved lists stay untouched.</em></label>
     </div>
     <div id="panel-test" class="rc-test" style="display:none">
@@ -2181,7 +2288,7 @@ document.addEventListener('DOMContentLoaded', function(){
   </section>
   <div class="rc-grid" id="recipients-panel">
     <section class="rc-list api">
-      <div class="rc-hd"><div><b>Brevo</b><span id="rc-api-country">Mail list for Portugal only</span></div><div class="rc-pill">Method 3</div></div>
+      <div class="rc-hd"><div><b>SendGrid</b><span id="rc-api-country">Mail list for Portugal only</span></div><div class="rc-pill">API</div></div>
       <div id="mail-queue-stats" class="rc-stat">Queue: loading…</div>
       <div class="rc-body" id="panel-campaign">
         <textarea id="validmails-editor" rows="10" placeholder="One email per line"></textarea>
@@ -2223,7 +2330,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <label>From email</label>
         <input type="text" name="from" value="<?php if(!$lase) echo $from_base;?>" <?php if($lase) echo "disabled"?> >
         <div class="setup-inline mode-smtp-any" style="margin-top:6px">
-          <label><input type="checkbox" name="lase" value="true" id="lase_cb" <?php if($lase || (!isset($_POST['action']) && $smtp_mode!=='brevo_api')) echo 'checked'; ?>> Email as login</label>
+          <label><input type="checkbox" name="lase" value="true" id="lase_cb" <?php if($lase || (!isset($_POST['action']) && $smtp_mode!=='sendgrid')) echo 'checked'; ?>> Email as login</label>
           <label><input type="checkbox" name="rndmail" value="true" <?php if(!empty($_POST['rndmail'])) echo "checked"; ?>> Random mail</label>
         </div>
         <div class="hint mode-only-brevo-api" style="margin-top:6px">From must be a verified sender in Brevo (or set <code>from:</code> per API account).</div>
@@ -2393,84 +2500,69 @@ document.addEventListener('DOMContentLoaded', function(){
   </div>
 
   <div class="nav-page" id="page-analytics">
-  <section class="setup-card mode-only-brevo-api" style="<?php if($smtp_mode!=='brevo_api') echo 'display:none'; ?>">
-    <h3>Brevo performance</h3>
-    <div class="stats-dash" id="brevo-stats-dash">
+  <section class="setup-card mode-only-brevo-api" style="<?php if($smtp_mode!=='sendgrid') echo 'display:none'; ?>">
+    <h3>SendGrid analytics (API sync)</h3>
+    <div class="sd-note" style="margin-bottom:12px">
+      Data is pulled locally via SendGrid REST APIs into <code>data/sendgrid_analytics.sqlite</code>.
+      <b>No Event Webhook</b>, no public URL, no ngrok. Sync is <b>on-demand polling</b> — not real-time.
+      Zero after a successful sync means no activity; unavailable APIs are labeled separately.
+    </div>
+    <div class="stats-dash" id="sg-stats-dash">
       <div class="sd-hd">
-        <h4>Transactional<small>Per account + domain auth</small></h4>
+        <h4>Campaign statistics<small>GET /v3/stats · local cache</small></h4>
         <div class="sd-controls">
-          <select id="brevo-stats-days" title="Period">
-            <option value="1">Today (calendar)</option>
+          <select id="sg-stats-days" title="Period">
+            <option value="1">Today</option>
             <option value="7" selected>Last 7 days</option>
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
           </select>
-          <input type="date" id="brevo-stats-date" title="Specific day" max="<?php echo date('Y-m-d'); ?>">
-          <button type="button" id="btn-brevo-stats-clear-date" class="sd-btn" title="Use period instead of calendar">Clear day</button>
-          <button type="button" id="btn-brevo-stats" class="sd-btn">Load stats</button>
+          <input type="date" id="sg-stats-start" title="Start date">
+          <input type="date" id="sg-stats-end" title="End date" max="<?php echo date('Y-m-d'); ?>">
+          <button type="button" id="btn-sg-load" class="sd-btn">Load local</button>
+          <button type="button" id="btn-sg-sync" class="sd-btn">Sync from SendGrid</button>
         </div>
       </div>
-      <div class="sd-overview" id="brevo-stats-kpis">
-        <div class="sd-kpi info"><b id="sk-requests">—</b><span>Emails sent</span></div>
-        <div class="sd-kpi ok"><b id="sk-delivered">—</b><span>Delivered</span></div>
-        <div class="sd-kpi fail"><b id="sk-bounced">—</b><span>Bounced</span></div>
-        <div class="sd-kpi"><b id="sk-credits">—</b><span>Credits left</span></div>
+      <div class="sd-overview" id="sg-stats-kpis" style="grid-template-columns:repeat(4,1fr)">
+        <div class="sd-kpi info"><b id="sg-requests">—</b><span>Requests</span></div>
+        <div class="sd-kpi"><b id="sg-processed">—</b><span>Processed</span></div>
+        <div class="sd-kpi ok"><b id="sg-delivered">—</b><span>Delivered</span></div>
+        <div class="sd-kpi fail"><b id="sg-bounces">—</b><span>Bounces</span></div>
+        <div class="sd-kpi"><b id="sg-deferred">—</b><span>Deferred</span></div>
+        <div class="sd-kpi"><b id="sg-opens">—</b><span>Opens</span></div>
+        <div class="sd-kpi"><b id="sg-clicks">—</b><span>Clicks</span></div>
+        <div class="sd-kpi"><b id="sg-credits">—</b><span>Credits left</span></div>
       </div>
-      <div class="sd-tabs" id="brevo-stats-tabs"></div>
-      <div class="sd-card" id="brevo-stats-panel">
-        <div class="sd-card-hd"><b>All accounts</b><span id="brevo-stats-range">Pick a period → Load stats</span></div>
-        <div class="sd-sent">Emails sent · <strong id="sk-panel-sent">—</strong></div>
-        <div id="brevo-stats-metrics"></div>
-        <div class="sd-local" id="brevo-stats-local" style="display:none"></div>
+      <div class="sd-card" id="sg-stats-panel">
+        <div class="sd-card-hd"><b>Engagement &amp; drops</b><span id="sg-stats-range">Sync or Load local</span></div>
+        <div id="sg-stats-metrics" class="sd-note">No local SendGrid stats yet.</div>
+        <div id="sg-caps" class="sd-note" style="margin-top:8px"></div>
       </div>
-      <div class="sd-msg" id="brevo-stats-msg"></div>
+      <div class="sd-msg" id="sg-stats-msg"></div>
 
-      <div class="ra-box" id="brevo-recipient-analytics">
-        <h4>Recipient-level analytics</h4>
-        <p class="ra-sub">Transactional sends (<code>POST /v3/smtp/email</code>). Click a KPI card to filter. Each row is one message (same address can appear many times with different subjects). Subjects marked <b>(unavailable)</b> could not be recovered from Brevo for that event.</p>
-        <div class="sd-overview" id="ra-kpis" style="grid-template-columns:repeat(5,1fr)">
-          <div class="sd-kpi ok clickable" data-ra-status="delivered"><b id="ra-kpi-delivered">—</b><span>Delivered msgs</span></div>
-          <div class="sd-kpi fail clickable" data-ra-status="hardBounce"><b id="ra-kpi-hard">—</b><span>Hard bounces</span></div>
-          <div class="sd-kpi fail clickable" data-ra-status="softBounce" style="border-color:#5a4030"><b id="ra-kpi-soft" style="color:#f59e0b">—</b><span>Soft bounces</span></div>
-          <div class="sd-kpi fail clickable" data-ra-status="bounced"><b id="ra-kpi-bounced">—</b><span>All bounced</span></div>
-          <div class="sd-kpi info clickable" data-ra-status="all"><b id="ra-kpi-total">—</b><span>Tracked messages</span></div>
+      <div class="ra-box" id="sg-message-analytics">
+        <h4>Email activity &amp; suppressions</h4>
+        <p class="ra-sub">Message rows come from <code>GET /v3/messages</code> (Email Activity Feed) when available, plus local accepted sends. Suppressions come from SendGrid suppression APIs. Group unsubscribe/resubscribe <b>event streams</b> are not fully pollable — ASM group definitions sync when present.</p>
+        <div class="sd-overview" id="sg-supp-kpis" style="grid-template-columns:repeat(5,1fr)">
+          <div class="sd-kpi fail"><b id="sg-supp-bounce">—</b><span>Bounce list</span></div>
+          <div class="sd-kpi fail"><b id="sg-supp-spam">—</b><span>Spam reports</span></div>
+          <div class="sd-kpi"><b id="sg-supp-block">—</b><span>Blocks</span></div>
+          <div class="sd-kpi"><b id="sg-supp-invalid">—</b><span>Invalid</span></div>
+          <div class="sd-kpi"><b id="sg-supp-unsub">—</b><span>Unsubscribes</span></div>
         </div>
         <div class="ra-filters">
-          <select id="ra-account" title="Account"><option value="">All accounts</option></select>
-          <select id="ra-status" title="Status">
+          <select id="sg-msg-status" title="Status">
             <option value="all">All statuses</option>
-            <option value="delivered">Delivered</option>
-            <option value="hardBounce">Hard Bounced</option>
-            <option value="softBounce">Soft Bounced</option>
-            <option value="bounced">All Bounced</option>
-            <option value="sent">Sent</option>
-            <option value="deferred">Deferred</option>
-            <option value="opened">Opened</option>
-            <option value="clicked">Clicked</option>
-            <option value="spam">Spam</option>
-            <option value="invalid">Invalid Email</option>
-            <option value="blocked">Blocked</option>
-            <option value="unsubscribed">Unsubscribed</option>
-            <option value="error">Error</option>
+            <option value="delivered">delivered</option>
+            <option value="not_delivered">not_delivered</option>
+            <option value="processed">processed</option>
           </select>
-          <select id="ra-subject" title="Subject"><option value="">All subjects</option></select>
-          <input type="search" id="ra-subject-q" placeholder="Search subject…" title="Subject contains">
-          <select id="ra-campaign" title="Campaign"><option value="">All campaigns</option></select>
-          <input type="date" id="ra-start" title="Start date">
-          <input type="date" id="ra-end" title="End date">
-          <input type="search" id="ra-email" placeholder="Recipient email…" title="Email search">
-          <button type="button" class="sd-btn" id="ra-btn-apply">Apply filters</button>
-          <button type="button" class="sd-btn" id="ra-btn-sync">Sync ALL accounts (90 days)</button>
-          <button type="button" class="sd-btn" id="ra-btn-probe">Probe API</button>
+          <input type="search" id="sg-msg-email" placeholder="Recipient email…" title="Email search">
+          <button type="button" class="sd-btn" id="sg-msg-apply">Apply</button>
+          <button type="button" class="sd-btn" id="sg-msg-prev">Prev</button>
+          <button type="button" class="sd-btn" id="sg-msg-next">Next</button>
+          <span id="sg-msg-page" style="margin-left:8px;color:var(--s-muted)">Page 1</span>
         </div>
-        <div class="ra-actions">
-          <button type="button" class="sd-btn" data-ra-export="delivered">Export Delivered</button>
-          <button type="button" class="sd-btn" data-ra-export="hardBounce">Export Hard Bounce</button>
-          <button type="button" class="sd-btn" data-ra-export="softBounce">Export Soft Bounce</button>
-          <button type="button" class="sd-btn" data-ra-export="bounced">Export All Bounced</button>
-          <button type="button" class="sd-btn" data-ra-export="current">Export Current Filter</button>
-        </div>
-        <div id="ra-progress" class="sd-note" style="display:none;white-space:pre-wrap;font-family:Consolas,monospace;font-size:12px"></div>
         <div class="ra-table-wrap">
           <table class="ra-table">
             <thead>
@@ -2478,33 +2570,23 @@ document.addEventListener('DOMContentLoaded', function(){
                 <th>Email</th>
                 <th>Subject</th>
                 <th>Status</th>
-                <th>Account</th>
-                <th>Campaign</th>
-                <th>Send date</th>
-                <th>Event date</th>
-                <th>Bounce reason</th>
+                <th>Opens</th>
+                <th>Clicks</th>
+                <th>Last event</th>
+                <th>Source</th>
               </tr>
             </thead>
-            <tbody id="ra-tbody"><tr><td colspan="8" style="color:#8b9bb0">Click <b>Sync ALL accounts (90 days)</b> to import recipient events from every Brevo API key.</td></tr></tbody>
+            <tbody id="sg-msg-tbody"><tr><td colspan="7" style="color:#8b9bb0">Click <b>Sync from SendGrid</b> to pull stats, activity, and suppressions into the local database.</td></tr></tbody>
           </table>
         </div>
-        <div class="ra-pager">
-          <span id="ra-pager-meta">0 messages · 0 unique emails</span>
-          <span>
-            <button type="button" class="sd-btn" id="ra-prev">Prev</button>
-            <span id="ra-page-label" style="margin:0 8px">Page 1</span>
-            <button type="button" class="sd-btn" id="ra-next">Next</button>
-          </span>
-        </div>
-        <div class="ra-hist" id="ra-history"></div>
-        <div class="ra-sync" id="ra-sync-msg">Historical sync uses GET /v3/smtp/statistics/events (≤90 days) for <b>each</b> of your Brevo API accounts. No webhook / public URL required. Aggregate KPIs above are separate from these recipient rows.</div>
-        <div class="sd-msg" id="ra-msg"></div>
+        <div class="ra-sync" id="sg-sync-msg">Sync uses SendGrid APIs only. Historical Brevo SQLite data (if present) is untouched and is not used for this dashboard.</div>
+        <div class="sd-msg" id="sg-msg-note"></div>
       </div>
     </div>
   </section>
-  <section class="setup-card mode-hide-api" style="<?php if($smtp_mode==='brevo_api') echo 'display:none'; ?>">
-    <h3>Brevo performance</h3>
-    <div class="hint" style="margin:0">Switch send mode to <b>Brevo API</b> on Setup to load per-account stats and domain authentication.</div>
+  <section class="setup-card mode-hide-api" style="<?php if($smtp_mode==='sendgrid') echo 'display:none'; ?>">
+    <h3>SendGrid analytics</h3>
+    <div class="hint" style="margin:0">Switch send mode to <b>SendGrid API</b> on Setup to sync delivery statistics locally.</div>
   </section>
   </div>
 
@@ -2692,7 +2774,7 @@ document.addEventListener('DOMContentLoaded', function(){
       var socks=document.querySelector('input[name=use_socks]');
       // Default SOCKS ON for normal mode; only honor explicit 0
       if(socks){
-        if(o.smtp_mode==='brevo' || o.smtp_mode==='brevo_api') socks.checked=false;
+        if(o.smtp_mode==='sendgrid' || o.smtp_mode==='brevo' || o.smtp_mode==='brevo_api') socks.checked=false;
         else if(o.use_socks===0 || o.use_socks==='0') socks.checked=false;
         else socks.checked=true;
       }
@@ -2737,19 +2819,15 @@ document.addEventListener('DOMContentLoaded', function(){
         if(socks){ socks.disabled=false; }
         if(workers){ workers.disabled=false; }
         syncSocksHidden();
-        var modeBrevo=document.getElementById('mode_brevo') && document.getElementById('mode_brevo').checked;
-        var modeApi=document.getElementById('mode_brevo_api') && document.getElementById('mode_brevo_api').checked;
+        var modeApi=document.getElementById('mode_sendgrid') && document.getElementById('mode_sendgrid').checked;
         var mySmtp=document.getElementById('my_smtp');
-        var brevo=document.getElementById('brevo_smtp');
-        var apiKeys=document.getElementById('brevo_api_keys');
         var fromEl=document.querySelector('input[name=from]');
         if(modeApi){
-          if(apiKeys && !(apiKeys.value||'').trim()){
-            ev.preventDefault();
-            alert('Brevo API: add at least one account (API key + From email → Add account).');
-            return false;
+          // API key lives in .env (SENDGRID_API_KEY) — server validates before send
+          if(fromEl && !(fromEl.value||'').trim()){
+            fromEl.value='notify@omnidigitalsuite.com';
           }
-        } else if(!modeBrevo && mySmtp && !(mySmtp.value||'').trim()){
+        } else if(mySmtp && !(mySmtp.value||'').trim()){
           var bulkEl=document.getElementById('bulk_smtp');
           var bulkTxt=bulkEl ? (bulkEl.value||'').trim() : '';
           if(bulkTxt && bulkTxt.charAt(0) !== '[' && bulkTxt.charAt(0) !== '{'){
@@ -2771,10 +2849,6 @@ document.addEventListener('DOMContentLoaded', function(){
             alert('Active SMTP list is empty (SMTP × 0).\nPaste host:port:user:pass into Active SMTP (or Bulk + Add SMTP), then Send.');
             return false;
           }
-        } else if(modeBrevo && brevo && !(brevo.value||'').trim()){
-          ev.preventDefault();
-          alert('Brevo SMTP: paste #ACCOUNT blocks in the Brevo box first.');
-          return false;
         }
         var listCamp=document.getElementById('list_mode_campaign');
         var listTest=document.getElementById('list_mode_test');
@@ -9601,82 +9675,17 @@ function brevo_api_fetch_credits_left($apiKey)
 }
 
 /**
- * Send one email via Brevo Transactional API (HTTP).
+ * REMOVED: Brevo Transactional API send path.
+ * All cloud sends use sendgrid_api_send_email() / sendEmail().
  * @return array{ok:bool, err:string, id:string}
  */
 function brevo_api_send_email($apiKey, $toEmail, $fromEmail, $fromName, $subject, $htmlOrText, $isHtml, $replyTo = '')
 {
-	$out = array('ok' => false, 'err' => '', 'id' => '');
-	$apiKey = trim((string)$apiKey);
-	$toEmail = trim((string)$toEmail);
-	$fromEmail = trim((string)$fromEmail);
-	if($apiKey === '' || $toEmail === '' || $fromEmail === '' || strpos($fromEmail, '@') === false)
-	{
-		$out['err'] = 'Missing API key, From email, or To';
-		return $out;
-	}
-	if(!function_exists('curl_init'))
-	{
-		$out['err'] = 'PHP curl extension required for Brevo API';
-		return $out;
-	}
-	$payload = array(
-		'sender' => array(
-			'name' => $fromName !== '' ? $fromName : $fromEmail,
-			'email' => $fromEmail
-		),
-		'to' => array(array('email' => $toEmail)),
-		'subject' => (string)$subject
+	return array(
+		'ok' => false,
+		'err' => 'Brevo send path removed — use SendGrid (SENDGRID_API_KEY)',
+		'id' => ''
 	);
-	if($isHtml)
-		$payload['htmlContent'] = (string)$htmlOrText;
-	else
-		$payload['textContent'] = (string)$htmlOrText;
-	if($replyTo !== '' && strpos($replyTo, '@') !== false)
-		$payload['replyTo'] = array('email' => $replyTo);
-
-	$ch = curl_init('https://api.brevo.com/v3/smtp/email');
-	curl_setopt_array($ch, array(
-		CURLOPT_POST => true,
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_HTTPHEADER => array(
-			'accept: application/json',
-			'content-type: application/json',
-			'api-key: '.$apiKey
-		),
-		CURLOPT_POSTFIELDS => json_encode($payload),
-		CURLOPT_TIMEOUT => 60,
-		CURLOPT_CONNECTTIMEOUT => 20
-	));
-	$body = curl_exec($ch);
-	$code = intval(curl_getinfo($ch, CURLINFO_HTTP_CODE));
-	$cerr = curl_error($ch);
-	curl_close($ch);
-	if($body === false || $cerr !== '')
-	{
-		$out['err'] = $cerr !== '' ? $cerr : 'curl failed';
-		return $out;
-	}
-	$json = json_decode($body, true);
-	if($code >= 200 && $code < 300)
-	{
-		$out['ok'] = true;
-		if(is_array($json) && !empty($json['messageId'])) $out['id'] = $json['messageId'];
-		// Persist recipient-level send locally (subject + messageId) for analytics correlation
-		if(function_exists('ba_record_local_send'))
-			ba_record_local_send($apiKey, $toEmail, (string)$subject, $out['id'], $fromEmail);
-		return $out;
-	}
-	$msg = '';
-	if(is_array($json))
-	{
-		if(!empty($json['message'])) $msg = $json['message'];
-		else if(!empty($json['error'])) $msg = is_string($json['error']) ? $json['error'] : json_encode($json['error']);
-	}
-	if($msg === '') $msg = substr($body, 0, 200);
-	$out['err'] = 'HTTP '.$code.($msg !== '' ? ' — '.$msg : '');
-	$out['http'] = $code;
-	return $out;
 }
 
 /**
@@ -9941,7 +9950,7 @@ function smtp_retire_blocked($idx, $err)
 function smtp_drop_known_blocked()
 {
 	global $allsmtps, $my_smtp, $smtp_mode;
-	if($smtp_mode === 'brevo' || $smtp_mode === 'brevo_api') return 0;
+	if($smtp_mode === 'sendgrid') return 0;
 	$blocked = smtp_blocked_load();
 	if(empty($blocked) || empty($allsmtps)) return 0;
 	$keep = array();
@@ -10093,11 +10102,11 @@ function dash_boot($total, $smtpCount, $proxyCount = 0)
 	$total = intval($total);
 	$smtpCount = intval($smtpCount);
 	$proxyCount = intval($proxyCount);
-	$isApi = (isset($smtp_mode) && $smtp_mode === 'brevo_api');
-	$isBrevo = (isset($smtp_mode) && ($smtp_mode === 'brevo' || $smtp_mode === 'brevo_api'));
+	$isApi = (isset($smtp_mode) && $smtp_mode === 'sendgrid');
+	$isBrevo = false;
 	$showSocks = !$isBrevo && !empty($use_socks);
 	$twoCol = $showSocks || $isApi;
-	$sub = $isApi ? 'Brevo API · Stop saves pending for later' : ($isBrevo ? 'Brevo SMTP · Stop saves pending for later' : 'Send via socks5_ok.txt · Stop saves pending for later');
+	$sub = $isApi ? 'SendGrid API · Stop saves pending for later' : 'Send via socks5_ok.txt · Stop saves pending for later';
 	echo '<script>document.body.classList.add("send-mode");</script>';
 	echo '<div id="send-dash" class="send-dash">';
 	echo '<div class="hd"><div class="hd-left"><span class="badge" id="live-badge"></span><h2>Campaign Control<small>'.htmlspecialchars($sub).'</small></h2></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" id="btn-dash-refresh" style="background:#1b2838;color:#e6edf5;border:1px solid #3d4f63;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer" title="Reload counters from disk — does not stop send">Refresh</button><button type="button" id="btn-stop-send" style="background:#c0392b;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer">Stop send</button><a id="btn-back-setup" href="index.php" style="display:none;background:#2d6a4f;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700;text-decoration:none">Back to setup</a><div class="status" id="dash-status">Starting…</div></div></div>';
@@ -10114,7 +10123,7 @@ function dash_boot($total, $smtpCount, $proxyCount = 0)
 	if($showSocks)
 	echo '<div class="stat info"><b id="d-proxy">'.($proxyCount>0?$proxyCount.' OK':'off').'</b><span>OK proxies</span></div>';
 	else
-	echo '<div class="stat info"><b id="d-proxy">'.($isApi?'Brevo API':'direct').'</b><span>Transport</span></div>';
+	echo '<div class="stat info"><b id="d-proxy">'.($isApi?'SendGrid API':'direct').'</b><span>Transport</span></div>';
 	echo '</div>';
 	echo '<div class="barwrap"><div class="barlab"><span>Send progress</span><span id="d-send-pct">0%</span></div><div class="bar"><i id="d-bar"></i></div></div>';
 	echo '<div class="meta" id="d-meta">Preparing campaign…</div>';
@@ -10904,7 +10913,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	exit(0);
 	}
 
-	$apiMode = (isset($smtp_mode) && $smtp_mode === 'brevo_api');
+	$apiMode = (isset($smtp_mode) && $smtp_mode === 'sendgrid');
 	$mail_queue_campaign = isset($mail_queue_campaign) ? $mail_queue_campaign : true;
 	if (!$subject && !$message)
 	{
@@ -10961,124 +10970,40 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	if(empty($nrotat) || intval($nrotat) <= 0) $nrotat = 50;
 	if(empty($send_workers) || intval($send_workers) <= 0) $send_workers = 1;
 
-	// -------- Brevo API --------
-	if($smtp_mode === 'brevo_api')
+	// -------- Twilio SendGrid REST API --------
+	if($smtp_mode === 'sendgrid')
 	{
 	@unlink(__DIR__.DIRECTORY_SEPARATOR.'stop_send.flag');
-	if(empty($brevo_api_accounts))
+	$sgStatus = sendgrid_config_status();
+	if(empty($sgStatus['ok']))
 	{
 		dash_boot(0, 0, 0);
-		dash_log('fail', 'Brevo API: add at least one API account first.');
-		dash_js("dashDone('No API accounts');");
+		dash_log('fail', 'SendGrid configuration error: '.(isset($sgStatus['err']) ? $sgStatus['err'] : 'not ready'));
+		dash_js("dashDone('SendGrid not configured');");
 		send_mark_stopped();
 		die();
 	}
-	$formFrom = trim($from_base !== '' ? $from_base : $from);
-	$needFormFrom = false;
-	foreach($brevo_api_accounts as $acc)
-	{
-		if(empty($acc['from']) || strpos($acc['from'], '@') === false) { $needFormFrom = true; break; }
-	}
-	if($needFormFrom && ($formFrom === '' || strpos($formFrom, '@') === false))
-	{
-		dash_boot(0, 0, 0);
-		dash_log('fail', 'Brevo API: set From email on each account (Edit).');
-		dash_js("dashDone('No From email');");
-		send_mark_stopped();
-		die();
-	}
+	$sgCfg = sendgrid_config();
+	$formFrom = $sgCfg['from_email'];
+	$from = $sgCfg['from_email'];
+	$from_base = $sgCfg['from_email'];
+	if($realname_base === '') $realname_base = $sgCfg['from_name'];
+	if($replyto === '') $replyto = $sgCfg['reply_to'];
 
 	$isTestSendEarly = empty($mail_queue_campaign);
 	$qCounts = mail_queue_counts();
-	if(!isset($wantN) || intval($wantN) < 1 || intval($wantN) > 10) $wantN = 10;
-	$wantN = intval($wantN);
-	$accountPool = $brevo_api_accounts;
-	dash_boot(max(1, $numemails), $wantN, 0);
-	dash_log('info', 'MODE: Brevo API — want '.$wantN.' working account(s) for '.strtoupper($send_country).' · pool '.count($accountPool).($isTestSendEarly ? ' — TEST' : ' · OK → mailssenddone'));
+	dash_boot(max(1, $numemails), 1, 0);
+	dash_log('info', 'MODE: SendGrid API — '.$sgCfg['from_email'].' · '.strtoupper($send_country).($isTestSendEarly ? ' — TEST' : ' · OK → mailssenddone'));
+	dash_log('info', 'Transport: POST https://api.sendgrid.com/v3/mail/send (HTTP 202 = accepted, not delivered)');
 	if(!$isTestSendEarly)
 	{
 		$resumeMsg = !empty($qCounts['resume_line']) ? (' · resume @ line '.$qCounts['resume_line']) : '';
 		dash_log('info', 'Queue: pending '.$qCounts['pending'].' · sent OK '.$qCounts['done'].' · in list '.$qCounts['valid'].$resumeMsg);
-		mail_queue_save_progress(array('phase' => 'start', 'credits_room' => null));
+		mail_queue_save_progress(array('phase' => 'start', 'provider' => 'sendgrid'));
 	}
-	dash_js("dashSet('api-cred-state','FETCHING'); dashAcctFetchBegin(".$wantN."); dashMeta('Checking accounts one by one…');");
-
-	$brevo_api_credits = array();
-	$brevo_api_exhausted = array();
-	$workingAccounts = array();
-	$workingCredits = array();
-	$checkedN = 0;
-	foreach($accountPool as $acc)
-	{
-		if(count($workingAccounts) >= $wantN) break;
-		if(send_stop_requested())
-		{
-			dash_log('warn', 'Stopped while checking accounts.');
-			dash_js("dashDone('Stopped');");
-			send_mark_stopped();
-			die();
-		}
-		$checkedN++;
-		$ff = !empty($acc['from']) ? $acc['from'] : ($formFrom !== '' ? $formFrom.' (form)' : '(missing from)');
-		$jsLabel = json_encode($ff, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-		dash_js('dashAcctFetchStart('.$checkedN.','.$jsLabel.');');
-		$why = '';
-		$credits = 0;
-		$okAcc = false;
-		if(!empty($acc['problem']))
-			$why = 'marked problem';
-		else if(empty($acc['key']))
-			$why = 'no API key';
-		else
-		{
-			$cred = brevo_account_health($acc['key'], !empty($acc['from']) ? $acc['from'] : $formFrom);
-			if(!empty($cred['blocking']))
-				$why = $cred['status_text'] !== '' ? $cred['status_text'] : 'not working';
-			else if(empty($cred['ok']))
-				$why = !empty($cred['err']) ? $cred['err'] : 'could not check';
-			else if(intval(floor($cred['credits'])) < 1)
-				$why = '0 credits left';
-			else
-			{
-				$okAcc = true;
-				$credits = floatval($cred['credits']);
-				$why = intval(floor($credits)).' left';
-				if(!empty($cred['status_text'])) $why .= ' · '.$cred['status_text'];
-			}
-		}
-		if($okAcc)
-		{
-			$workingAccounts[] = $acc;
-			$workingCredits[] = $credits;
-		}
-		$detail = json_encode($ff.' · '.$why, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-		dash_js('dashAcctFetchDone('.$checkedN.','.($okAcc ? 'true' : 'false').','.$detail.','.count($workingAccounts).','.$wantN.');');
-		dash_log($okAcc ? 'info' : 'warn', '  Check '.$checkedN.': '.($okAcc ? 'WORKING' : 'SKIP').' · '.$ff.' · '.$why);
-	}
-	$brevo_api_accounts = array_values($workingAccounts);
-	foreach($workingCredits as $wid => $wcred)
-		$brevo_api_credits[$wid] = $wcred;
-	$anyRoom = count($brevo_api_accounts) > 0;
-	brevo_api_dash_snapshot();
-	$foundN = count($brevo_api_accounts);
-	dash_js("dashSet('api-cred-state','READY'); dashSmtp('".$foundN." working');".($foundN > 0 ? " dashAcctFetchFinish(".$foundN.");" : ""));
-	if($foundN < $wantN)
-		dash_log('info', 'Asked for '.$wantN.' working accounts. Found '.$foundN.' after checking '.$checkedN.'. Sending with those.');
-	else
-		dash_log('info', 'Ready: '.$foundN.' working account(s). Checked '.$checkedN.'.');
-
-	$totalRoom = brevo_api_total_room();
-	if(!$anyRoom || $totalRoom < 1 || brevo_api_pick_next() === false)
-	{
-		brevo_api_dash_snapshot();
-		dash_log('fail', 'No credits left today. Come back tomorrow (or add another account).');
-		dash_js("dashDone('0 credits today — try tomorrow');");
-		send_mark_stopped();
-		die();
-	}
-
+	dash_js("dashSet('api-cred-state','READY'); dashProxy('SendGrid API'); dashSmtp('SendGrid');");
 	$isTestSend = empty($mail_queue_campaign);
-	$pendingAll = $allemails; // already resolved above (campaign pending or test box)
+	$pendingAll = $allemails;
 	$resumeLine = null;
 	if(!$isTestSend)
 	{
@@ -11090,32 +11015,26 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 		dash_log('info', 'TEST list: '.count($pendingAll).' (campaign list untouched)');
 	}
 
-	// Batch size = today's credits only.
-	$allemails = array_slice($pendingAll, 0, $totalRoom);
+	$allemails = $pendingAll;
 	$numemails = count($allemails);
-	$leftForLater = count($pendingAll) - $numemails;
 	dash_js('dashSet("d-total",'.intval($numemails).'); window.__dash.total='.intval($numemails).';');
-	if($isTestSend)
-		dash_log('info', 'Test batch: '.$numemails.' (credits room '.$totalRoom.')');
-	else
-		dash_log('info', 'Today batch: '.$numemails.' (credits '.$totalRoom.') · still pending after today: '.$leftForLater.($resumeLine ? ' · starting @ validmails line '.$resumeLine : ''));
+	dash_log('info', ($isTestSend ? 'Test' : 'Campaign').' batch: '.$numemails.($resumeLine ? ' · starting @ validmails line '.$resumeLine : ''));
 	if(!$isTestSend)
 	{
 		mail_queue_save_progress(array(
 			'phase' => 'sending',
-			'credits_room' => $totalRoom,
+			'provider' => 'sendgrid',
 			'today_batch' => $numemails,
-			'pending_after_batch' => $leftForLater,
 			'started_at_resume_line' => $resumeLine
 		));
 	}
-	content_variants_prepare(count($brevo_api_accounts));
-	dash_js("dashProxy('Brevo API'); dashSmtp('API × ".count($brevo_api_accounts)."');");
-	dash_log('info', 'Content: '.count($content_variants).' HTML variant(s) split across '.count($brevo_api_accounts).' API account(s)');
+	content_variants_prepare(1);
+	dash_log('info', 'Content: '.count($content_variants).' HTML variant(s)');
 	$isHtmlApi = ($contenttype == 'html');
 	@unlink(__DIR__.DIRECTORY_SEPARATOR.'pending_emails.txt');
 	$sessionOk = array();
 	$sessionOkMap = array();
+	$variantSlot = 0;
 
 	for($x = 1; $x <= $numemails; $x++)
 	{
@@ -11136,117 +11055,62 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			send_mark_stopped();
 			die();
 		}
-		if(brevo_api_total_room() < 1)
+		$to = preg_replace('/\s+/', '', $allemails[$x - 1]);
+		$realname = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $realname_base);
+		if(isset($_POST['rndname'])) $realname = $faker->name;
+		$cv = content_variant_for_slot($variantSlot, false);
+		$msgSrc = ($cv['message'] !== '') ? $cv['message'] : $message_base;
+		$subjSrc = ($cv['subject'] !== '') ? $cv['subject'] : $subject_base;
+		$message = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $msgSrc);
+		$subject = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $subjSrc);
+		$from = $sgCfg['from_email'];
+		$who = mail_name_from_email($to);
+		$message = str_replace('#name#', $who, $message);
+		$subject = str_replace('#name#', $who, $subject);
+		$message = preg_replace('/!!EMAIL!!/', $to, $message);
+		$subject = preg_replace('/!!EMAIL!!/', $to, $subject);
+		$message = preg_replace('/!!DATE!!/', date('d/m/Y'), $message);
+		$subject = preg_replace('/!!DATE!!/', date('d/m/Y'), $subject);
+		$message = preg_replace('/!!TIME!!/', date('H:i:s'), $message);
+		$subject = preg_replace('/!!TIME!!/', date('H:i:s'), $subject);
+		$message = stripslashes($message);
+		$subject = stripslashes($subject);
+		$vNum = intval($cv['index']) + 1;
+		dash_log('info', ($isTestSend ? 'Test' : 'Batch').' '.$x.'/'.$numemails.' → '.$to.' · SendGrid · HTML '.$vNum);
+		dash_js("dashMeta('SendGrid ".$x."/".$numemails." → ".str_replace("'","\\'",$to)."'); dashProgress(".$x."); dashSmtp('SendGrid');");
+		dash_log('info', 'From: '.$from.' → To: '.$to);
+		$r = sendgrid_api_send_email($to, $from, $realname, $subject, $message, $isHtmlApi, $replyto);
+		if(!empty($r['ok']))
 		{
-			$left = count($pendingAll) - count($sessionOk);
-			if(!$isTestSend)
+			content_variant_for_slot($variantSlot, true);
+			dash_log('ok', 'ACCEPTED '.$to.(!empty($r['id']) ? ' · id '.$r['id'] : '').' (HTTP 202)');
+			dash_js('dashOk();');
+			if(!$isTestSend) mail_queue_mark_done($to);
+			$sessionOk[] = $to;
+			$sessionOkMap[$to] = true;
+			if(!$isTestSend && count($sessionOk) % 25 === 0)
 			{
 				mail_queue_save_progress(array(
-					'phase' => 'credits_exhausted',
+					'phase' => 'sending',
 					'session_ok' => count($sessionOk),
-					'pending_left' => $left
+					'batch_pos' => $x,
+					'batch_total' => $numemails
 				));
 			}
-			dash_log('warn', 'Credits finished. OK: '.count($sessionOk).($isTestSend ? '' : (' · pending left: '.$left)));
-			dash_js("dashDone('Credits done');");
-			send_mark_stopped();
-			die();
 		}
-		$to = preg_replace('/\s+/', '', $allemails[$x - 1]);
-		$sentThis = false;
-		$lastErr = '';
-		for($tryAcc = 0; $tryAcc < count($brevo_api_accounts); $tryAcc++)
+		else
 		{
-			$acc = brevo_api_pick_next();
-			if($acc === false) break;
-			if(brevo_api_room_left($brevo_api_cur) < 1)
-			{
-				brevo_api_mark_exhausted($brevo_api_cur, '0 left before send');
-				continue;
-			}
-			$realname = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $realname_base);
-			if(isset($_POST['rndname'])) $realname = $faker->name;
-			if(!empty($acc['name'])) $realname = $acc['name'];
-			$cv = content_variant_for_slot($brevo_api_cur, false);
-			$msgSrc = ($cv['message'] !== '') ? $cv['message'] : $message_base;
-			$subjSrc = ($cv['subject'] !== '') ? $cv['subject'] : $subject_base;
-			$message = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $msgSrc);
-			$subject = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $subjSrc);
-			$apiFrom = (!empty($acc['from']) && strpos($acc['from'], '@') !== false) ? $acc['from'] : $formFrom;
-			$from = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $apiFrom);
-			$who = mail_name_from_email($to);
-			$message = str_replace('#name#', $who, $message);
-			$subject = str_replace('#name#', $who, $subject);
-			$message = preg_replace('/!!EMAIL!!/', $to, $message);
-			$subject = preg_replace('/!!EMAIL!!/', $to, $subject);
-			$message = preg_replace('/!!DATE!!/', date('d/m/Y'), $message);
-			$subject = preg_replace('/!!DATE!!/', date('d/m/Y'), $subject);
-			$message = preg_replace('/!!TIME!!/', date('H:i:s'), $message);
-			$subject = preg_replace('/!!TIME!!/', date('H:i:s'), $subject);
-			$message = stripslashes($message);
-			$subject = stripslashes($subject);
-			$vNum = ($brevo_api_cur % max(1, count($content_variants))) + 1;
-			if(!empty($content_variant_buckets[$brevo_api_cur]) && count($content_variant_buckets[$brevo_api_cur]) > 1)
-				$vNum = intval($cv['index']) + 1;
-			dash_log('info', ($isTestSend ? 'Test' : 'Batch').' '.$x.'/'.$numemails.' → '.$to.' · API account '.($brevo_api_cur + 1).' · HTML '.$vNum.' (room '.brevo_api_room_left($brevo_api_cur).')');
-			dash_js("dashMeta('API ".$x."/".$numemails." · acct ".($brevo_api_cur+1)." → ".str_replace("'","\\'",$to)."'); dashProgress(".$x."); dashSmtp('API ".($brevo_api_cur+1)."');");
-			dash_log('info', 'From: '.$from.' → To: '.$to);
-			$r = brevo_api_send_email($acc['key'], $to, $from, $realname, $subject, $message, $isHtmlApi, $replyto);
-			if(!empty($r['ok']))
-			{
-				content_variant_for_slot($brevo_api_cur, true); // rotate multi-HTML bucket only after OK
-				dash_log('ok', 'OK  '.$to.(!empty($r['id']) ? ' · id '.$r['id'] : ''));
-				dash_js('dashOk();');
-				brevo_api_note_sent_ok();
-				if(!$isTestSend) mail_queue_mark_done($to);
-				$sessionOk[] = $to;
-				$sessionOkMap[$to] = true;
-				if(!$isTestSend && count($sessionOk) % 25 === 0)
-				{
-					mail_queue_save_progress(array(
-						'phase' => 'sending',
-						'session_ok' => count($sessionOk),
-						'batch_pos' => $x,
-						'batch_total' => $numemails
-					));
-				}
-				$sentThis = true;
-				break;
-			}
-			$lastErr = isset($r['err']) ? $r['err'] : 'not sent';
-			$httpCode = isset($r['http']) ? intval($r['http']) : 0;
-			if($httpCode === 402 || brevo_api_err_is_credits($lastErr))
-			{
-				brevo_api_mark_exhausted($brevo_api_cur, $lastErr);
-				dash_log('warn', 'Account '.($brevo_api_cur + 1).' out of credits — retry '.$to.' on next account');
-				continue;
-			}
-			dash_log('fail', 'FAIL '.$to.' — '.$lastErr.($isTestSend ? '' : ' (not marked done — will retry next run)'));
+			$lastErr = isset($r['err']) ? $r['err'] : 'not accepted';
+			$st = isset($r['status']) ? $r['status'] : 'failed';
+			dash_log('fail', 'FAIL '.$to.' — '.$lastErr.' ['.$st.']'.($isTestSend ? '' : ' (not marked done — will retry next run)'));
 			dash_js('dashFail();');
-			$sentThis = true;
-			break;
-		}
-		if(!$sentThis)
-		{
-			if(brevo_api_pick_next() === false)
+			if($st === 'configuration_error')
 			{
-				$left = count($pendingAll) - count($sessionOk);
-				if(!$isTestSend)
-				{
-					mail_queue_save_progress(array(
-						'phase' => 'credits_exhausted',
-						'session_ok' => count($sessionOk),
-						'pending_left' => $left
-					));
-				}
-				dash_log('fail', 'Credits finished. OK: '.count($sessionOk).($isTestSend ? '' : (' · pending left: '.$left)));
-				dash_js('dashFail();');
-				dash_js("dashDone('Credits done');");
+				dash_log('fail', 'SendGrid configuration error — stopping batch.');
+				dash_js("dashDone('SendGrid config error');");
 				send_mark_stopped();
 				die();
 			}
-			dash_log('fail', 'FAIL '.$to.' — '.($lastErr !== '' ? $lastErr : 'no account'));
-			dash_js('dashFail();');
 		}
 		flush();
 		if(!empty($pause) && doubleval($pause) > 0 && $x < $numemails && !empty($pemails) && ($x % intval($pemails) == 0))
@@ -11254,18 +11118,19 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	}
 	if($isTestSend)
 	{
-		dash_log('info', 'Test finished. OK: '.count($sessionOk).' / '.$numemails.' (validmails + mailssenddone untouched)');
+		dash_log('info', 'Test finished. Accepted: '.count($sessionOk).' / '.$numemails.' (validmails + mailssenddone untouched)');
 	}
 	else
 	{
 		$finalCounts = mail_queue_counts();
 		mail_queue_save_progress(array(
 			'phase' => 'finished',
+			'provider' => 'sendgrid',
 			'session_ok' => count($sessionOk),
 			'pending_left' => $finalCounts['pending'],
 			'resume_line_in_validmails' => $finalCounts['resume_line']
 		));
-		dash_log('info', 'Campaign finished. OK this run → mailssenddone: '.count($sessionOk).' · pending left: '.$finalCounts['pending'].($finalCounts['resume_line'] ? ' · next resume @ line '.$finalCounts['resume_line'] : '').' · validmails untouched');
+		dash_log('info', 'Campaign finished. Accepted this run → mailssenddone: '.count($sessionOk).' · pending left: '.$finalCounts['pending'].($finalCounts['resume_line'] ? ' · next resume @ line '.$finalCounts['resume_line'] : '').' · validmails untouched');
 	}
 	dash_js("dashDone();");
 	send_mark_stopped();

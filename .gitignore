@@ -40,6 +40,10 @@
 /campaigns/
 /conf/
 /vendor/
+.env
+/data/sendgrid.log
+/data/sendgrid_analytics.sqlite
+/data/sendgrid_analytics.sqlite-*
 /data/brevo_analytics.sqlite
 /data/brevo_analytics.sqlite-*
 /data/brevo_analytics_config.json
