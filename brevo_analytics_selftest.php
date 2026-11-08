@@ -43,6 +43,8 @@ t('Unique emails counted', $list['unique_emails'] === 2, 'unique='.$list['unique
 $h = ba_key_hash('xkeysib-testkey-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 $r = ba_import_event($pdo, array(
 	'account_key_hash' => $h,
+	'account_index' => 1,
+	'account_label' => 'Acct 1 · from@example.com',
 	'email' => 'user@example.com',
 	'event' => 'delivered',
 	'date' => '2026-11-01T10:00:00Z',
@@ -55,8 +57,10 @@ t('Delivered event inserted', $r === 'inserted', $r);
 
 $r = ba_import_event($pdo, array(
 	'account_key_hash' => $h,
+	'account_index' => 2,
+	'account_label' => 'Acct 2',
 	'email' => 'user@example.com',
-	'event' => 'hardBounce',
+	'event' => 'hardBounces', // API plural form
 	'date' => '2026-11-04T10:00:00Z',
 	'messageId' => '<msg-2@brevo.test>',
 	'subject' => 'New Product Announcement',
@@ -64,7 +68,7 @@ $r = ba_import_event($pdo, array(
 	'event_source' => 'test',
 	'raw_payload' => '{}'
 ));
-t('Hard bounce event inserted', $r === 'inserted', $r);
+t('Hard bounce event inserted (API plural hardBounces)', $r === 'inserted', $r);
 
 // Duplicate protection
 $r = ba_import_event($pdo, array(
@@ -85,6 +89,12 @@ t('Filter delivered', $del['total'] >= 1, 'total='.$del['total']);
 
 $hb = ba_query_messages(array('status' => 'hardBounce'), 1, 50);
 t('Filter hardBounce', $hb['total'] === 1, 'total='.$hb['total']);
+
+$acct2 = ba_query_messages(array('account_index' => 2), 1, 50);
+t('Filter by account_index=2', $acct2['total'] >= 1, 'total='.$acct2['total']);
+ba_upsert_account_meta($h, 1, 'Acct 1 · from@example.com', 'from@example.com', 'xkeysib-test…');
+$meta = ba_list_accounts_meta();
+t('Account meta stored', count($meta) >= 1);
 
 $subj = ba_query_messages(array('status' => 'delivered', 'subject' => 'November Special Offer'), 1, 50);
 t('Filter delivered + subject', $subj['total'] >= 1, 'total='.$subj['total']);

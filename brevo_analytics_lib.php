@@ -307,14 +307,63 @@ function ba_db_migrate(PDO $pdo)
 		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 	)");
 
+	$pdo->exec("CREATE TABLE IF NOT EXISTS ba_accounts (
+		account_key_hash TEXT PRIMARY KEY,
+		account_index INTEGER NOT NULL DEFAULT 0,
+		account_label TEXT NOT NULL DEFAULT '',
+		from_email TEXT NOT NULL DEFAULT '',
+		key_preview TEXT NOT NULL DEFAULT '',
+		last_sync_at TEXT NOT NULL DEFAULT '',
+		last_sync_status TEXT NOT NULL DEFAULT '',
+		last_retrieved INTEGER NOT NULL DEFAULT 0,
+		last_imported INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)");
+
+	$pdo->exec("CREATE TABLE IF NOT EXISTS ba_sync_jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		job_token TEXT NOT NULL UNIQUE,
+		status TEXT NOT NULL DEFAULT 'running',
+		start_date TEXT NOT NULL DEFAULT '',
+		end_date TEXT NOT NULL DEFAULT '',
+		account_count INTEGER NOT NULL DEFAULT 0,
+		current_account_index INTEGER NOT NULL DEFAULT 0,
+		accounts_json TEXT NOT NULL DEFAULT '[]',
+		progress_json TEXT NOT NULL DEFAULT '[]',
+		totals_json TEXT NOT NULL DEFAULT '{}',
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)");
+
+	ba_db_add_column($pdo, 'ba_messages', 'account_index', "INTEGER NOT NULL DEFAULT 0");
+	ba_db_add_column($pdo, 'ba_messages', 'account_label', "TEXT NOT NULL DEFAULT ''");
+	ba_db_add_column($pdo, 'ba_events', 'account_index', "INTEGER NOT NULL DEFAULT 0");
+	ba_db_add_column($pdo, 'ba_sync_runs', 'account_index', "INTEGER NOT NULL DEFAULT 0");
+	ba_db_add_column($pdo, 'ba_sync_runs', 'account_label', "TEXT NOT NULL DEFAULT ''");
+
 	$pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS ba_msg_uniq ON ba_messages(account_key_hash, brevo_message_id, recipient_email) WHERE brevo_message_id != ''");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_msg_email ON ba_messages(recipient_email)");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_msg_status ON ba_messages(current_status)");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_msg_subject ON ba_messages(subject)");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_msg_send ON ba_messages(send_date)");
+	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_msg_acct ON ba_messages(account_index)");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_evt_msg ON ba_events(brevo_message_id)");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_evt_email ON ba_events(recipient_email)");
 	$pdo->exec("CREATE INDEX IF NOT EXISTS ba_evt_type ON ba_events(event_type)");
+}
+
+function ba_db_add_column(PDO $pdo, $table, $column, $ddl)
+{
+	$cols = array();
+	try {
+		$st = $pdo->query('PRAGMA table_info('.$table.')');
+		while ($r = $st->fetch()) $cols[$r['name']] = true;
+	} catch (Exception $e) {
+		return;
+	}
+	if (!isset($cols[$column])) {
+		try { $pdo->exec("ALTER TABLE $table ADD COLUMN $column $ddl"); } catch (Exception $e) {}
+	}
 }
 
 function ba_http($method, $url, $apiKey, $body = null, $timeout = 45, $retries = 3)
@@ -465,8 +514,13 @@ function ba_upsert_message(PDO $pdo, array $msg)
 		$subjectAvail = 0;
 	}
 
+	$acctIndex = isset($msg['account_index']) ? intval($msg['account_index']) : 0;
+	$acctLabel = isset($msg['account_label']) ? (string)$msg['account_label'] : '';
+
 	$fields = array(
 		'account_key_hash' => $hash,
+		'account_index' => $acctIndex,
+		'account_label' => $acctLabel,
 		'recipient_email' => $email,
 		'subject' => $subject,
 		'subject_available' => $subjectAvail,
@@ -487,10 +541,10 @@ function ba_upsert_message(PDO $pdo, array $msg)
 	if ($row) {
 		$id = intval($row['id']);
 		// Never wipe a known subject with empty/unavailable
-		if ($fields['subject'] === '' && $row['subject'] !== '') {
+		if ($fields['subject'] === '' && $row['subject'] !== '' && $row['subject'] !== '(unavailable)') {
 			$fields['subject'] = $row['subject'];
 			$fields['subject_available'] = intval($row['subject_available']);
-		} else if ($fields['subject'] !== '' && intval($row['subject_available']) === 0) {
+		} else if ($fields['subject'] !== '' && $fields['subject'] !== '(unavailable)') {
 			$fields['subject_available'] = 1;
 		}
 		if ($fields['send_date'] === '' && $row['send_date'] !== '') $fields['send_date'] = $row['send_date'];
@@ -501,6 +555,8 @@ function ba_upsert_message(PDO $pdo, array $msg)
 		if ($fields['campaign_name'] === '' && $row['campaign_name'] !== '') $fields['campaign_name'] = $row['campaign_name'];
 		if ($fields['uuid'] === '' && $row['uuid'] !== '') $fields['uuid'] = $row['uuid'];
 		if ($fields['account_key_hash'] === '' && $row['account_key_hash'] !== '') $fields['account_key_hash'] = $row['account_key_hash'];
+		if ($fields['account_index'] < 1 && !empty($row['account_index'])) $fields['account_index'] = intval($row['account_index']);
+		if ($fields['account_label'] === '' && !empty($row['account_label'])) $fields['account_label'] = $row['account_label'];
 
 		// Preserve stronger current_status unless caller forces
 		if (empty($msg['force_status'])) {
@@ -512,13 +568,14 @@ function ba_upsert_message(PDO $pdo, array $msg)
 		}
 
 		$st = $pdo->prepare("UPDATE ba_messages SET
-			account_key_hash=?, recipient_email=?, subject=?, subject_available=?,
+			account_key_hash=?, account_index=?, account_label=?, recipient_email=?, subject=?, subject_available=?,
 			campaign_id=?, campaign_name=?, brevo_message_id=?, template_id=?, tags=?,
 			send_date=?, provider_source=?, current_status=?, bounce_reason=?, event_date=?,
 			uuid=?, from_email=?, updated_at=datetime('now')
 			WHERE id=?");
 		$st->execute(array(
-			$fields['account_key_hash'], $fields['recipient_email'], $fields['subject'], $fields['subject_available'],
+			$fields['account_key_hash'], $fields['account_index'], $fields['account_label'],
+			$fields['recipient_email'], $fields['subject'], $fields['subject_available'],
 			$fields['campaign_id'], $fields['campaign_name'], $fields['brevo_message_id'], $fields['template_id'], $fields['tags'],
 			$fields['send_date'], $fields['provider_source'], $fields['current_status'], $fields['bounce_reason'], $fields['event_date'],
 			$fields['uuid'], $fields['from_email'], $id
@@ -534,12 +591,13 @@ function ba_upsert_message(PDO $pdo, array $msg)
 	}
 
 	$st = $pdo->prepare("INSERT INTO ba_messages (
-		account_key_hash, recipient_email, subject, subject_available, campaign_id, campaign_name,
+		account_key_hash, account_index, account_label, recipient_email, subject, subject_available, campaign_id, campaign_name,
 		brevo_message_id, template_id, tags, send_date, provider_source, current_status,
 		bounce_reason, event_date, uuid, from_email
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
 	$st->execute(array(
-		$fields['account_key_hash'], $fields['recipient_email'], $fields['subject'], $fields['subject_available'],
+		$fields['account_key_hash'], $fields['account_index'], $fields['account_label'],
+		$fields['recipient_email'], $fields['subject'], $fields['subject_available'],
 		$fields['campaign_id'], $fields['campaign_name'], $fields['brevo_message_id'], $fields['template_id'], $fields['tags'],
 		$fields['send_date'], $fields['provider_source'], $fields['current_status'], $fields['bounce_reason'],
 		$fields['event_date'], $fields['uuid'], $fields['from_email']
@@ -600,11 +658,16 @@ function ba_import_event(PDO $pdo, array $ev)
 	$chk->execute(array($uid));
 	if ($chk->fetch()) return 'skipped';
 
+	$acctIndex = isset($ev['account_index']) ? intval($ev['account_index']) : 0;
+	$acctLabel = isset($ev['account_label']) ? (string)$ev['account_label'] : '';
+
 	$msgId = ba_upsert_message($pdo, array(
 		'account_key_hash' => $hash,
+		'account_index' => $acctIndex,
+		'account_label' => $acctLabel,
 		'recipient_email' => $email,
 		'subject' => $subject,
-		'subject_available' => ($subject !== '') ? 1 : 0,
+		'subject_available' => ($subject !== '' && $subject !== '(unavailable)') ? 1 : 0,
 		'brevo_message_id' => $mid,
 		'template_id' => $templateId,
 		'tags' => $tags,
@@ -622,11 +685,11 @@ function ba_import_event(PDO $pdo, array $ev)
 
 	try {
 		$ins = $pdo->prepare("INSERT INTO ba_events (
-			message_row_id, account_key_hash, recipient_email, brevo_message_id, event_type, event_ts,
+			message_row_id, account_key_hash, account_index, recipient_email, brevo_message_id, event_type, event_ts,
 			bounce_reason, subject, template_id, tags, link, event_source, event_uid, raw_payload
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
 		$ins->execute(array(
-			$msgId, $hash, $email, $mid, $etype, $ets, $reason, $subject, $templateId,
+			$msgId, $hash, $acctIndex, $email, $mid, $etype, $ets, $reason, $subject, $templateId,
 			ba_tags_to_string($tags), $link, $source, $uid, $raw
 		));
 	} catch (PDOException $ex) {
@@ -694,40 +757,79 @@ function ba_fetch_email_log($apiKey, array $query)
 }
 
 /**
- * Pull transactional events for up to 90 days with pagination.
+ * Pull transactional events for one account (paginated, resumable).
+ *
+ * @param array $opts account_index, account_label, from, sync_run_id, resume_offset, max_pages, enrich_limit
  */
-function ba_sync_events_for_account($apiKey, $startDate, $endDate, $syncRunId = 0)
+function ba_sync_events_for_account($apiKey, $startDate, $endDate, $syncRunId = 0, array $opts = array())
 {
 	$pdo = ba_db();
 	$hash = ba_key_hash($apiKey);
-	$stats = array('retrieved' => 0, 'imported' => 0, 'skipped' => 0, 'failed' => 0, 'err' => '');
+	$acctIndex = isset($opts['account_index']) ? intval($opts['account_index']) : 0;
+	$acctLabel = isset($opts['account_label']) ? (string)$opts['account_label'] : ('Acct '.$acctIndex);
+	$fromEmail = isset($opts['from']) ? (string)$opts['from'] : '';
 	$limit = 2500;
-	$offset = 0;
-	$maxPages = 200;
+	$offset = isset($opts['resume_offset']) ? max(0, intval($opts['resume_offset'])) : 0;
+	$maxPages = isset($opts['max_pages']) ? max(1, intval($opts['max_pages'])) : 40;
+	$enrichLimit = isset($opts['enrich_limit']) ? intval($opts['enrich_limit']) : 300;
 
-	// Chunk by 90-day max (caller should already clamp)
+	$stats = array(
+		'retrieved' => isset($opts['retrieved_so_far']) ? intval($opts['retrieved_so_far']) : 0,
+		'imported' => isset($opts['imported_so_far']) ? intval($opts['imported_so_far']) : 0,
+		'skipped' => isset($opts['skipped_so_far']) ? intval($opts['skipped_so_far']) : 0,
+		'failed' => isset($opts['failed_so_far']) ? intval($opts['failed_so_far']) : 0,
+		'err' => '',
+		'http' => 0,
+		'pages_done' => 0,
+		'resume_offset' => $offset,
+		'done' => false,
+		'subjects_filled' => 0,
+		'sample_event' => null
+	);
+
+	ba_upsert_account_meta($hash, $acctIndex, $acctLabel, $fromEmail, ba_key_preview($apiKey));
+
 	for ($page = 0; $page < $maxPages; $page++) {
-		$res = ba_fetch_events_page($apiKey, array(
+		$query = array(
 			'limit' => $limit,
 			'offset' => $offset,
 			'startDate' => $startDate,
 			'endDate' => $endDate,
 			'sort' => 'desc'
-		));
+		);
+		$res = ba_fetch_events_page($apiKey, $query);
+		$stats['http'] = isset($res['http']) ? intval($res['http']) : 0;
 		if (!$res['ok']) {
 			$stats['err'] = $res['err'];
+			$stats['done'] = false;
 			break;
 		}
 		$events = array();
 		if (!empty($res['data']['events']) && is_array($res['data']['events'])) $events = $res['data']['events'];
 		$n = count($events);
-		if ($n < 1) break;
+		if ($n < 1) {
+			$stats['done'] = true;
+			break;
+		}
+		if ($stats['sample_event'] === null && isset($events[0]) && is_array($events[0])) {
+			$sample = $events[0];
+			// Strip nothing sensitive beyond email domain for debug
+			$stats['sample_event'] = array(
+				'event' => isset($sample['event']) ? $sample['event'] : '',
+				'has_email' => !empty($sample['email']),
+				'has_messageId' => !empty($sample['messageId']),
+				'has_subject' => !empty($sample['subject']),
+				'date' => isset($sample['date']) ? $sample['date'] : ''
+			);
+		}
 
 		foreach ($events as $e) {
 			if (!is_array($e)) { $stats['failed']++; continue; }
 			$stats['retrieved']++;
 			$result = ba_import_event($pdo, array(
 				'account_key_hash' => $hash,
+				'account_index' => $acctIndex,
+				'account_label' => $acctLabel,
 				'email' => isset($e['email']) ? $e['email'] : '',
 				'event' => isset($e['event']) ? $e['event'] : '',
 				'date' => isset($e['date']) ? $e['date'] : '',
@@ -736,7 +838,7 @@ function ba_sync_events_for_account($apiKey, $startDate, $endDate, $syncRunId = 
 				'subject' => isset($e['subject']) ? $e['subject'] : '',
 				'tag' => isset($e['tag']) ? $e['tag'] : '',
 				'templateId' => isset($e['templateId']) ? $e['templateId'] : '',
-				'from' => isset($e['from']) ? $e['from'] : '',
+				'from' => isset($e['from']) ? $e['from'] : $fromEmail,
 				'link' => isset($e['link']) ? $e['link'] : '',
 				'event_source' => 'smtp_statistics_events',
 				'raw_payload' => json_encode($e)
@@ -746,47 +848,158 @@ function ba_sync_events_for_account($apiKey, $startDate, $endDate, $syncRunId = 
 			else $stats['failed']++;
 		}
 
+		$offset += $n;
+		$stats['pages_done']++;
+		$stats['resume_offset'] = $offset;
+
 		if ($syncRunId > 0) {
-			$pdo->prepare('UPDATE ba_sync_runs SET total_retrieved=?, new_imported=?, existing_skipped=?, failed=?, resume_offset=? WHERE id=?')
-				->execute(array($stats['retrieved'], $stats['imported'], $stats['skipped'], $stats['failed'], $offset + $n, $syncRunId));
+			$pdo->prepare('UPDATE ba_sync_runs SET total_retrieved=?, new_imported=?, existing_skipped=?, failed=?, resume_offset=?, account_index=?, account_label=? WHERE id=?')
+				->execute(array($stats['retrieved'], $stats['imported'], $stats['skipped'], $stats['failed'], $offset, $acctIndex, $acctLabel, $syncRunId));
 		}
 
-		$offset += $n;
-		if ($n < $limit) break;
-		usleep(150000); // gentle rate limit
+		if ($n < $limit) {
+			$stats['done'] = true;
+			break;
+		}
+		usleep(120000);
 	}
 
-	// Enrich subjects for messages still missing subject via /smtp/emails when we have messageId
-	ba_enrich_subjects($apiKey, 200);
+	if ($stats['err'] === '' && $stats['done']) {
+		$stats['subjects_filled'] = ba_enrich_subjects($apiKey, $enrichLimit, $acctIndex);
+	}
+
+	ba_upsert_account_meta($hash, $acctIndex, $acctLabel, $fromEmail, ba_key_preview($apiKey), array(
+		'last_sync_at' => ba_utc_now(),
+		'last_sync_status' => ($stats['err'] !== '' ? 'error' : ($stats['done'] ? 'ok' : 'partial')),
+		'last_retrieved' => $stats['retrieved'],
+		'last_imported' => $stats['imported']
+	));
 
 	return $stats;
 }
 
-function ba_enrich_subjects($apiKey, $limit = 100)
+function ba_upsert_account_meta($hash, $index, $label, $fromEmail, $keyPreview, array $extra = array())
+{
+	$pdo = ba_db();
+	$st = $pdo->prepare('SELECT account_key_hash FROM ba_accounts WHERE account_key_hash = ?');
+	$st->execute(array($hash));
+	if ($st->fetch()) {
+		$pdo->prepare("UPDATE ba_accounts SET account_index=?, account_label=?, from_email=?, key_preview=?,
+			last_sync_at=COALESCE(?, last_sync_at), last_sync_status=COALESCE(?, last_sync_status),
+			last_retrieved=COALESCE(?, last_retrieved), last_imported=COALESCE(?, last_imported),
+			updated_at=datetime('now') WHERE account_key_hash=?")->execute(array(
+			$index, $label, $fromEmail, $keyPreview,
+			isset($extra['last_sync_at']) ? $extra['last_sync_at'] : null,
+			isset($extra['last_sync_status']) ? $extra['last_sync_status'] : null,
+			isset($extra['last_retrieved']) ? $extra['last_retrieved'] : null,
+			isset($extra['last_imported']) ? $extra['last_imported'] : null,
+			$hash
+		));
+	} else {
+		$pdo->prepare("INSERT INTO ba_accounts (account_key_hash, account_index, account_label, from_email, key_preview, last_sync_at, last_sync_status, last_retrieved, last_imported)
+			VALUES (?,?,?,?,?,?,?,?,?)")->execute(array(
+			$hash, $index, $label, $fromEmail, $keyPreview,
+			isset($extra['last_sync_at']) ? $extra['last_sync_at'] : '',
+			isset($extra['last_sync_status']) ? $extra['last_sync_status'] : '',
+			isset($extra['last_retrieved']) ? intval($extra['last_retrieved']) : 0,
+			isset($extra['last_imported']) ? intval($extra['last_imported']) : 0
+		));
+	}
+}
+
+function ba_list_accounts_meta()
+{
+	$pdo = ba_db();
+	return $pdo->query('SELECT * FROM ba_accounts ORDER BY account_index ASC, updated_at DESC')->fetchAll();
+}
+
+function ba_probe_account_events($apiKey, $startDate, $endDate)
+{
+	$res = ba_fetch_events_page($apiKey, array(
+		'limit' => 5,
+		'offset' => 0,
+		'startDate' => $startDate,
+		'endDate' => $endDate,
+		'sort' => 'desc'
+	));
+	$out = array(
+		'ok' => $res['ok'],
+		'err' => $res['err'],
+		'http' => $res['http'],
+		'event_count_page' => 0,
+		'sample' => null
+	);
+	if ($res['ok'] && !empty($res['data']['events']) && is_array($res['data']['events'])) {
+		$out['event_count_page'] = count($res['data']['events']);
+		$e = $res['data']['events'][0];
+		$out['sample'] = array(
+			'event' => isset($e['event']) ? $e['event'] : '',
+			'has_email' => !empty($e['email']),
+			'has_messageId' => !empty($e['messageId']),
+			'has_subject' => !empty($e['subject']),
+			'date' => isset($e['date']) ? $e['date'] : ''
+		);
+	}
+	return $out;
+}
+
+function ba_enrich_subjects($apiKey, $limit = 100, $accountIndex = 0)
 {
 	$pdo = ba_db();
 	$hash = ba_key_hash($apiKey);
-	$st = $pdo->prepare("SELECT id, brevo_message_id, recipient_email FROM ba_messages
+	$sql = "SELECT id, brevo_message_id, recipient_email FROM ba_messages
 		WHERE (subject_available=0 OR subject='' OR subject='(unavailable)')
 		AND brevo_message_id != ''
-		AND (account_key_hash = ? OR account_key_hash = '')
-		ORDER BY id DESC LIMIT ?");
-	$st->execute(array($hash, intval($limit)));
+		AND account_key_hash = ?";
+	$params = array($hash);
+	if ($accountIndex > 0) {
+		$sql .= " AND account_index = ?";
+		$params[] = $accountIndex;
+	}
+	$sql .= " ORDER BY id DESC LIMIT ?";
+	$params[] = intval($limit);
+	$st = $pdo->prepare($sql);
+	$st->execute($params);
 	$rows = $st->fetchAll();
 	$filled = 0;
 	foreach ($rows as $row) {
-		$res = ba_fetch_email_log($apiKey, array(
-			'messageId' => $row['brevo_message_id'],
-			'limit' => 1
-		));
-		if (!$res['ok']) {
-			// try by email (less precise)
-			continue;
-		}
+		$mid = $row['brevo_message_id'];
+		$candidates = array($mid);
+		$trim = trim($mid, '<>');
+		if ($trim !== $mid) $candidates[] = $trim;
+		if ($mid !== '' && $mid[0] !== '<') $candidates[] = '<'.$mid.'>';
+
 		$list = array();
-		if (!empty($res['data']['transactionalEmails']) && is_array($res['data']['transactionalEmails'])) {
-			$list = $res['data']['transactionalEmails'];
+		foreach ($candidates as $cand) {
+			$res = ba_fetch_email_log($apiKey, array('messageId' => $cand, 'limit' => 5));
+			if ($res['ok'] && !empty($res['data']['transactionalEmails']) && is_array($res['data']['transactionalEmails'])) {
+				$list = $res['data']['transactionalEmails'];
+				break;
+			}
 		}
+		// Fallback: filter by recipient email within a recent month window
+		if (empty($list) && !empty($row['recipient_email'])) {
+			$end = gmdate('Y-m-d');
+			$start = gmdate('Y-m-d', strtotime('-29 days'));
+			$res = ba_fetch_email_log($apiKey, array(
+				'email' => $row['recipient_email'],
+				'startDate' => $start,
+				'endDate' => $end,
+				'limit' => 20,
+				'sort' => 'desc'
+			));
+			if ($res['ok'] && !empty($res['data']['transactionalEmails'])) {
+				foreach ($res['data']['transactionalEmails'] as $te) {
+					if (!is_array($te)) continue;
+					$teMid = isset($te['messageId']) ? ba_normalize_message_id($te['messageId']) : '';
+					if ($teMid !== '' && $teMid === ba_normalize_message_id($mid)) {
+						$list = array($te);
+						break;
+					}
+				}
+			}
+		}
+
 		foreach ($list as $te) {
 			if (!is_array($te)) continue;
 			$subj = isset($te['subject']) ? (string)$te['subject'] : '';
@@ -803,9 +1016,15 @@ function ba_enrich_subjects($apiKey, $limit = 100)
 			$filled++;
 			break;
 		}
-		usleep(80000);
+		usleep(50000);
 	}
 	return $filled;
+}
+
+function ba_subject_unavailable_count()
+{
+	$pdo = ba_db();
+	return intval($pdo->query("SELECT COUNT(*) FROM ba_messages WHERE subject_available=0 OR subject='' OR subject='(unavailable)'")->fetchColumn());
 }
 
 function ba_create_weekly_export($apiKey, $notifyURL)
@@ -974,6 +1193,10 @@ function ba_build_message_filters(array $in)
 		$where[] = 'account_key_hash = ?';
 		$params[] = $in['account_key_hash'];
 	}
+	if (isset($in['account_index']) && $in['account_index'] !== '' && intval($in['account_index']) > 0) {
+		$where[] = 'account_index = ?';
+		$params[] = intval($in['account_index']);
+	}
 
 	return array(implode(' AND ', $where), $params);
 }
@@ -1133,14 +1356,16 @@ function ba_export_csv(array $filters, $outStream = null)
 	}
 	// UTF-8 BOM for Excel
 	fwrite($outStream, "\xEF\xBB\xBF");
-	$headers = array('Email','Subject','Status','Campaign Name','Campaign ID','Sent Date','Event Date','Bounce Reason','Message ID','Template ID','Tags');
+	$headers = array('Email','Subject','Status','Account','Account Index','Campaign Name','Campaign ID','Sent Date','Event Date','Bounce Reason','Message ID','Template ID','Tags','From');
 	fwrite($outStream, implode(',', $headers)."\r\n");
 	$count = 0;
 	while ($r = $st->fetch()) {
 		$line = array(
 			ba_csv_escape($r['recipient_email']),
-			ba_csv_escape($r['subject_available'] ? $r['subject'] : '(unavailable)'),
+			ba_csv_escape(!empty($r['subject_available']) ? $r['subject'] : '(unavailable)'),
 			ba_csv_escape($r['current_status']),
+			ba_csv_escape(isset($r['account_label']) ? $r['account_label'] : ''),
+			ba_csv_escape(isset($r['account_index']) ? $r['account_index'] : ''),
 			ba_csv_escape($r['campaign_name']),
 			ba_csv_escape($r['campaign_id']),
 			ba_csv_escape($r['send_date']),
@@ -1148,7 +1373,8 @@ function ba_export_csv(array $filters, $outStream = null)
 			ba_csv_escape($r['bounce_reason']),
 			ba_csv_escape($r['brevo_message_id']),
 			ba_csv_escape($r['template_id']),
-			ba_csv_escape($r['tags'])
+			ba_csv_escape($r['tags']),
+			ba_csv_escape($r['from_email'])
 		);
 		fwrite($outStream, implode(',', $line)."\r\n");
 		$count++;

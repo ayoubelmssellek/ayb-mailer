@@ -1515,8 +1515,10 @@ document.addEventListener('DOMContentLoaded', function(){
       if(campVal.indexOf('id:')===0) campId=campVal.slice(3);
       else if(campVal.indexOf('name:')===0) campName=campVal.slice(5);
     }
+    var acctEl=document.getElementById('ra-account');
     return {
       status:(document.getElementById('ra-status')||{}).value||'all',
+      account_index:acctEl&&acctEl.value?acctEl.value:'',
       subject:subjSel&&subjSel.value?subjSel.value:'',
       subject_q:(document.getElementById('ra-subject-q')||{}).value||'',
       campaign_id:campId,
@@ -1527,6 +1529,37 @@ document.addEventListener('DOMContentLoaded', function(){
       page:window.__raPage||1,
       per_page:50
     };
+  }
+  function raApiKeysText(){
+    var ta=document.getElementById('brevo_api_keys');
+    return ta?(ta.value||''):'';
+  }
+  function raProgressShow(txt){
+    var el=document.getElementById('ra-progress');
+    if(!el) return;
+    el.style.display='block';
+    el.textContent=txt||'';
+  }
+  function raFillAccounts(list){
+    var sel=document.getElementById('ra-account');
+    if(!sel) return;
+    var cur=sel.value;
+    var html='<option value="">All accounts</option>';
+    (list||[]).forEach(function(a){
+      var idx=a.account_index||a.index;
+      var lab=a.account_label||a.label||('Acct '+idx);
+      html+='<option value="'+sdEsc(String(idx))+'">'+sdEsc(lab)+'</option>';
+    });
+    // Also seed from currently configured API accounts if DB empty
+    if((!list||!list.length) && typeof brevoParseLocalAccounts==='function'){
+      var locals=brevoParseLocalAccounts(raApiKeysText());
+      locals.forEach(function(a,i){
+        var lab='Acct '+(i+1)+(a.from?(' · '+a.from):'');
+        html+='<option value="'+(i+1)+'">'+sdEsc(lab)+'</option>';
+      });
+    }
+    sel.innerHTML=html;
+    if(cur) sel.value=cur;
   }
   function raStatusPill(st){
     st=String(st||'');
@@ -1549,17 +1582,19 @@ document.addEventListener('DOMContentLoaded', function(){
     var tb=document.getElementById('ra-tbody');
     if(!tb) return;
     if(!rows||!rows.length){
-      tb.innerHTML='<tr><td colspan="7" style="color:#8b9bb0">No recipient records for this filter. Run Sync Brevo Recipient Data.</td></tr>';
+      tb.innerHTML='<tr><td colspan="8" style="color:#8b9bb0">No recipient records for this filter. Click <b>Sync ALL accounts (90 days)</b>.</td></tr>';
       return;
     }
     var html='';
     rows.forEach(function(r){
       var subj=r.subject_available==1||r.subject_available==='1'?r.subject:'(unavailable)';
       var camp=(r.campaign_name||r.campaign_id||'—');
+      var acct=r.account_label||(r.account_index?('Acct '+r.account_index):'—');
       html+='<tr>'
         +'<td><a class="ra-email" data-email="'+sdEsc(r.recipient_email)+'">'+sdEsc(r.recipient_email)+'</a></td>'
         +'<td>'+sdEsc(subj)+'</td>'
         +'<td>'+raStatusPill(r.current_status)+'</td>'
+        +'<td>'+sdEsc(acct)+'</td>'
         +'<td>'+sdEsc(camp)+'</td>'
         +'<td>'+sdEsc(r.send_date||'—')+'</td>'
         +'<td>'+sdEsc(r.event_date||'—')+'</td>'
@@ -1640,7 +1675,9 @@ document.addEventListener('DOMContentLoaded', function(){
       var html='<h5>'+sdEsc(email)+' · '+(d.count||0)+' message(s)</h5><ol>';
       (d.messages||[]).forEach(function(m, idx){
         var subj=m.subject_available==1||m.subject_available==='1'?m.subject:'(unavailable)';
+        var acct=m.account_label||(m.account_index?('Acct '+m.account_index):'');
         html+='<li><b>'+sdEsc(subj)+'</b> — '+raStatusPill(m.current_status)
+          +(acct?(' · '+sdEsc(acct)):'')
           +' · '+(sdEsc(m.send_date||m.event_date||''))
           +(m.bounce_reason?(' · '+sdEsc(m.bounce_reason)):'')
           +(m.brevo_message_id?(' · <span style="color:#8b9bb0">'+sdEsc(m.brevo_message_id)+'</span>'):'')
@@ -1671,70 +1708,146 @@ document.addEventListener('DOMContentLoaded', function(){
     form.submit();
     document.body.removeChild(form);
   }
-  function raSync(){
-    var ta=document.getElementById('brevo_api_keys');
-    var text=ta?(ta.value||''):'';
-    if(!text.trim()){ raMsg('Add at least one API account on Setup first.', true); return; }
-    var daysEl=document.getElementById('brevo-stats-days');
-    var days=daysEl?parseInt(daysEl.value,10):90;
-    if(!days||days<1) days=90;
-    if(days>90) days=90;
-    var pub=(document.getElementById('ra-public-url')||{}).value||'';
-    var weekly=!!(document.getElementById('ra-weekly-export')&&document.getElementById('ra-weekly-export').checked);
-    var btn=document.getElementById('ra-btn-sync');
-    if(btn){ btn.disabled=true; btn.textContent='Syncing…'; }
-    raMsg('Syncing Brevo transactional events (max 90 days)…');
-    fetch(raApiBase('brevo_recipients_sync.php'),{
+  function raPostSync(body){
+    return fetch(raApiBase('brevo_recipients_sync.php'),{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:text, days:days, weekly_export:weekly, public_base_url:pub}),
-      cache:'no-store'
-    }).then(function(r){return r.json();}).then(function(d){
-      if(btn){ btn.disabled=false; btn.textContent='Sync Brevo Recipient Data'; }
-      if(!d||!d.ok){ raMsg((d&&d.err)||'Sync failed', true); return; }
-      var t=d.totals||{};
-      raMsg('Sync OK · retrieved '+t.retrieved+' · new '+t.imported+' · skipped '+t.skipped+' · failed '+t.failed+' · range '+(d.date_range&&d.date_range.start)+' → '+(d.date_range&&d.date_range.end));
-      var sm=document.getElementById('ra-sync-msg');
-      if(sm && d.limitations){
-        sm.textContent='Coverage: events ≤90d; weekly export ≤7d; '+((d.limitations&&d.limitations.subjects)||'');
-      }
-      raLoadSubjectsCampaigns();
-      raLoadList();
-    }).catch(function(e){
-      if(btn){ btn.disabled=false; btn.textContent='Sync Brevo Recipient Data'; }
-      raMsg('Sync request failed'+(e&&e.message?(' — '+e.message):''), true);
+      body:JSON.stringify(body),cache:'no-store'
+    }).then(function(r){
+      return r.text().then(function(t){
+        var d=null;
+        try{ d=t?JSON.parse(t):null; }catch(e){ d=null; }
+        if(!d) throw new Error('HTTP '+r.status+' — non-JSON response (often a PHP timeout). Use per-account sync.');
+        return d;
+      });
     });
   }
-  function raWebhook(action){
-    var ta=document.getElementById('brevo_api_keys');
-    var text=ta?(ta.value||''):'';
-    var pub=(document.getElementById('ra-public-url')||{}).value||'';
-    raMsg(action==='create'?'Creating/reusing Brevo webhooks…':'Loading webhook status…');
-    fetch(raApiBase('brevo_webhook_setup.php'),{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:action==='create'?'create':(pub?'save_url':'status'), text:text, public_base_url:pub}),
-      cache:'no-store'
-    }).then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ raMsg((d&&d.err)||'Webhook call failed', true); return; }
-      if(action==='create'){
-        var okN=(d.accounts||[]).filter(function(a){return a.ok;}).length;
-        raMsg('Webhooks · '+okN+'/'+(d.accounts||[]).length+' accounts · URL '+(d.webhook_url||''));
-      } else {
-        if(pub){
-          // after save, fetch status
-          return fetch(raApiBase('brevo_webhook_setup.php'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'status'}),cache:'no-store'}).then(function(r){return r.json();});
-        }
-        raMsg('Webhook URL: '+(d.webhook_url||'(set public HTTPS base URL)')+' · can_create='+(d.can_create?'yes':'no'));
-      }
-      return d;
+  function raStepAccount(text, accountIndex, days, state){
+    state=state||{resume_offset:0, retrieved:0, imported:0, skipped:0, failed:0, sync_run_id:0};
+    return raPostSync({
+      action:'step',
+      text:text,
+      days:days,
+      account_index:accountIndex,
+      resume_offset:state.resume_offset||0,
+      retrieved_so_far:state.retrieved||0,
+      imported_so_far:state.imported||0,
+      skipped_so_far:state.skipped||0,
+      failed_so_far:state.failed||0,
+      sync_run_id:state.sync_run_id||0,
+      max_pages:15
     }).then(function(d){
-      if(d&&d.webhook_url) raMsg('Webhook URL: '+d.webhook_url+' · type '+(d.webhook_type||'transactional')+' · can_create='+(d.can_create?'yes':'no'));
-    }).catch(function(e){ raMsg('Webhook request failed'+(e&&e.message?(' — '+e.message):''), true); });
+      if(!d) throw new Error('Empty sync response');
+      var st=d.stats||{};
+      var next={
+        resume_offset:d.resume_offset||st.resume_offset||0,
+        retrieved:st.retrieved||0,
+        imported:st.imported||0,
+        skipped:st.skipped||0,
+        failed:st.failed||0,
+        sync_run_id:d.sync_run_id||state.sync_run_id||0,
+        err:st.err||(!d.ok?(d.err||'error'):''),
+        done:!!st.done && !d.continue,
+        label:d.account_label||('Acct '+accountIndex),
+        counts:d.counts||null,
+        sample:st.sample_event||null
+      };
+      if(d.continue){
+        raProgressShow(window.__raProgressLog+'\n  …paging '+next.label+' offset '+next.resume_offset+' (retrieved '+next.retrieved+', new '+next.imported+')');
+        return raStepAccount(text, accountIndex, days, next);
+      }
+      return next;
+    });
+  }
+  function raSync(){
+    var text=raApiKeysText();
+    if(!text.trim()){ raMsg('Add at least one API account on Setup first (same keys as aggregate analytics).', true); return; }
+    var days=90; // always max historical window for recipient sync
+    var btn=document.getElementById('ra-btn-sync');
+    if(btn){ btn.disabled=true; btn.textContent='Syncing…'; }
+    window.__raProgressLog='';
+    raMsg('Starting multi-account historical sync (90 days, all API keys)…');
+    raProgressShow('Starting…');
+    raPostSync({action:'start', text:text, days:days}).then(function(start){
+      if(!start||!start.ok) throw new Error((start&&start.err)||'Failed to start sync');
+      var accounts=start.accounts||[];
+      if(!accounts.length) throw new Error('No accounts parsed from API keys text');
+      var range=start.date_range||{};
+      window.__raProgressLog='Sync job · '+accounts.length+' account(s) · '+(range.start||'')+' → '+(range.end||'');
+      raProgressShow(window.__raProgressLog);
+      raFillAccounts(accounts.map(function(a){ return {account_index:a.index, account_label:a.label}; }));
+      var totals={retrieved:0, imported:0, skipped:0, failed:0, ok:0, fail:0};
+      var i=0;
+      function nextAccount(){
+        if(i>=accounts.length){
+          if(btn){ btn.disabled=false; btn.textContent='Sync ALL accounts (90 days)'; }
+          window.__raProgressLog+='\n\nDONE · accounts OK '+totals.ok+' / failed '+totals.fail
+            +'\nTotal retrieved '+totals.retrieved+' · new '+totals.imported+' · skipped '+totals.skipped+' · failed rows '+totals.failed;
+          raProgressShow(window.__raProgressLog);
+          raMsg('Sync finished · '+totals.ok+'/'+accounts.length+' accounts OK · imported '+totals.imported+' new events/messages');
+          var sm=document.getElementById('ra-sync-msg');
+          if(sm) sm.textContent='Last sync covered '+(range.start||'')+' → '+(range.end||'')+' across '+accounts.length+' accounts. Aggregate KPIs can differ from recipient event counts.';
+          raLoadSubjectsCampaigns();
+          raLoadList();
+          return;
+        }
+        var acct=accounts[i];
+        var n=acct.index;
+        window.__raProgressLog+='\n['+(i+1)+'/'+accounts.length+'] Syncing '+acct.label+' …';
+        raProgressShow(window.__raProgressLog);
+        raMsg('Syncing '+acct.label+' ('+(i+1)+'/'+accounts.length+')…');
+        return raStepAccount(text, n, days, null).then(function(res){
+          if(res.err){
+            totals.fail++;
+            window.__raProgressLog+='\n  FAIL '+acct.label+' — '+res.err;
+          } else {
+            totals.ok++;
+            totals.retrieved+=res.retrieved||0;
+            totals.imported+=res.imported||0;
+            totals.skipped+=res.skipped||0;
+            totals.failed+=res.failed||0;
+            window.__raProgressLog+='\n  OK '+acct.label+' · retrieved '+res.retrieved+' · new '+res.imported+' · skipped '+res.skipped+' · failed '+res.failed;
+            if(res.sample) window.__raProgressLog+='\n    sample event='+res.sample.event+' subject='+(res.sample.has_subject?'yes':'no');
+          }
+          if(res.counts) raFillKpis(res.counts);
+          raProgressShow(window.__raProgressLog);
+          i++;
+          return nextAccount();
+        }).catch(function(err){
+          totals.fail++;
+          window.__raProgressLog+='\n  FAIL '+acct.label+' — '+(err&&err.message?err.message:err);
+          raProgressShow(window.__raProgressLog);
+          i++;
+          return nextAccount();
+        });
+      }
+      return nextAccount();
+    }).catch(function(e){
+      if(btn){ btn.disabled=false; btn.textContent='Sync ALL accounts (90 days)'; }
+      raMsg('Sync failed'+(e&&e.message?(' — '+e.message):''), true);
+    });
+  }
+  function raProbe(){
+    var text=raApiKeysText();
+    if(!text.trim()){ raMsg('Add API accounts on Setup first.', true); return; }
+    raMsg('Probing events API for all accounts…');
+    raPostSync({action:'probe', text:text, days:90}).then(function(d){
+      if(!d||!d.ok){ raMsg((d&&d.err)||'Probe failed', true); return; }
+      var lines=['Probe '+(d.date_range&&d.date_range.start)+' → '+(d.date_range&&d.date_range.end)];
+      (d.accounts||[]).forEach(function(a){
+        var p=a.probe||{};
+        lines.push(a.label+': '+(p.ok?('OK · page events '+p.event_count_page+(p.sample?(' · sample '+p.sample.event):'')):('FAIL · '+(p.err||'error'))));
+      });
+      raProgressShow(lines.join('\n'));
+      raMsg('Probe complete — see progress box.');
+    }).catch(function(e){ raMsg('Probe failed'+(e&&e.message?(' — '+e.message):''), true); });
   }
   (function initRa(){
     var apply=document.getElementById('ra-btn-apply');
     if(apply) apply.onclick=function(){ window.__raPage=1; raLoadList(); };
     var sync=document.getElementById('ra-btn-sync');
     if(sync) sync.onclick=raSync;
+    var probe=document.getElementById('ra-btn-probe');
+    if(probe) probe.onclick=raProbe;
     var prev=document.getElementById('ra-prev');
     if(prev) prev.onclick=function(){ if(window.__raPage>1){ window.__raPage--; raLoadList(); } };
     var next=document.getElementById('ra-next');
@@ -1762,12 +1875,13 @@ document.addEventListener('DOMContentLoaded', function(){
     for(var i=0;i<acts.length;i++){
       (function(btn){ btn.onclick=function(){ raExport(btn.getAttribute('data-ra-export')); }; })(acts[i]);
     }
-    var whs=document.getElementById('ra-btn-wh-status');
-    if(whs) whs.onclick=function(){ raWebhook('status'); };
-    var whc=document.getElementById('ra-btn-wh-create');
-    if(whc) whc.onclick=function(){ raWebhook('create'); };
-    // Auto-load local rows when analytics page is opened
-    setTimeout(function(){ raLoadSubjectsCampaigns(); raLoadList(); }, 400);
+    setTimeout(function(){
+      raFillAccounts([]);
+      fetch(raApiBase('brevo_recipients.php'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'accounts'}),cache:'no-store'})
+        .then(function(r){return r.json();}).then(function(d){ if(d&&d.ok) raFillAccounts(d.accounts||[]); }).catch(function(){});
+      raLoadSubjectsCampaigns();
+      raLoadList();
+    }, 400);
   })();
 
   function mqMsg(t, ok, lane){
@@ -2322,6 +2436,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="sd-kpi info clickable" data-ra-status="all"><b id="ra-kpi-total">—</b><span>Tracked messages</span></div>
         </div>
         <div class="ra-filters">
+          <select id="ra-account" title="Account"><option value="">All accounts</option></select>
           <select id="ra-status" title="Status">
             <option value="all">All statuses</option>
             <option value="delivered">Delivered</option>
@@ -2345,7 +2460,8 @@ document.addEventListener('DOMContentLoaded', function(){
           <input type="date" id="ra-end" title="End date">
           <input type="search" id="ra-email" placeholder="Recipient email…" title="Email search">
           <button type="button" class="sd-btn" id="ra-btn-apply">Apply filters</button>
-          <button type="button" class="sd-btn" id="ra-btn-sync">Sync Brevo Recipient Data</button>
+          <button type="button" class="sd-btn" id="ra-btn-sync">Sync ALL accounts (90 days)</button>
+          <button type="button" class="sd-btn" id="ra-btn-probe">Probe API</button>
         </div>
         <div class="ra-actions">
           <button type="button" class="sd-btn" data-ra-export="delivered">Export Delivered</button>
@@ -2353,9 +2469,8 @@ document.addEventListener('DOMContentLoaded', function(){
           <button type="button" class="sd-btn" data-ra-export="softBounce">Export Soft Bounce</button>
           <button type="button" class="sd-btn" data-ra-export="bounced">Export All Bounced</button>
           <button type="button" class="sd-btn" data-ra-export="current">Export Current Filter</button>
-          <button type="button" class="sd-btn" id="ra-btn-wh-status">Webhook status</button>
-          <button type="button" class="sd-btn" id="ra-btn-wh-create">Setup webhooks</button>
         </div>
+        <div id="ra-progress" class="sd-note" style="display:none;white-space:pre-wrap;font-family:Consolas,monospace;font-size:12px"></div>
         <div class="ra-table-wrap">
           <table class="ra-table">
             <thead>
@@ -2363,13 +2478,14 @@ document.addEventListener('DOMContentLoaded', function(){
                 <th>Email</th>
                 <th>Subject</th>
                 <th>Status</th>
+                <th>Account</th>
                 <th>Campaign</th>
                 <th>Send date</th>
                 <th>Event date</th>
                 <th>Bounce reason</th>
               </tr>
             </thead>
-            <tbody id="ra-tbody"><tr><td colspan="7" style="color:#8b9bb0">Load stats / sync to populate recipient rows.</td></tr></tbody>
+            <tbody id="ra-tbody"><tr><td colspan="8" style="color:#8b9bb0">Click <b>Sync ALL accounts (90 days)</b> to import recipient events from every Brevo API key.</td></tr></tbody>
           </table>
         </div>
         <div class="ra-pager">
@@ -2381,12 +2497,8 @@ document.addEventListener('DOMContentLoaded', function(){
           </span>
         </div>
         <div class="ra-hist" id="ra-history"></div>
-        <div class="ra-sync" id="ra-sync-msg">Sync not run yet. Historical coverage: events API ≤ 90 days; weekly export ≤ 7 days; subjects from webhooks/export/local sends or /smtp/emails correlation.</div>
+        <div class="ra-sync" id="ra-sync-msg">Historical sync uses GET /v3/smtp/statistics/events (≤90 days) for <b>each</b> of your Brevo API accounts. No webhook / public URL required. Aggregate KPIs above are separate from these recipient rows.</div>
         <div class="sd-msg" id="ra-msg"></div>
-        <div class="ra-filters" style="margin-top:10px">
-          <input type="url" id="ra-public-url" placeholder="https://your-public-host/.../ayb-mailer" title="Public HTTPS base URL for webhooks" style="min-width:280px;flex:1">
-          <label style="font-size:12px;color:#8b9bb0;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ra-weekly-export"> Also request 7-day weekly export</label>
-        </div>
       </div>
     </div>
   </section>

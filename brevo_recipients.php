@@ -26,7 +26,8 @@ try {
 		'campaign_name' => isset($in['campaign_name']) ? $in['campaign_name'] : '',
 		'start_date' => isset($in['start_date']) ? $in['start_date'] : '',
 		'end_date' => isset($in['end_date']) ? $in['end_date'] : '',
-		'account_key_hash' => isset($in['account_key_hash']) ? $in['account_key_hash'] : ''
+		'account_key_hash' => isset($in['account_key_hash']) ? $in['account_key_hash'] : '',
+		'account_index' => isset($in['account_index']) ? $in['account_index'] : ''
 	);
 
 	if ($action === 'meta') {
@@ -36,18 +37,25 @@ try {
 			'provider' => 'transactional',
 			'send_endpoint' => 'POST /v3/smtp/email',
 			'status_filters' => ba_status_filters_supported(),
+			'accounts' => ba_list_accounts_meta(),
+			'subjects_unavailable' => ba_subject_unavailable_count(),
 			'historical_limits' => array(
 				'events_api_max_days' => 90,
 				'email_logs_requires_filter' => true,
 				'email_logs_max_range_days' => 30,
 				'weekly_export_days' => 7,
 				'weekly_export_max_jobs_per_7_days' => 20,
-				'note' => 'Subjects older than webhook/export coverage may be (unavailable) unless correlatable via messageId + local send records or /v3/smtp/emails.'
+				'note' => 'Subjects may be (unavailable) unless present in events, /v3/smtp/emails, local sends, or weekly export. Webhooks are not required for historical sync.'
 			),
 			'webhook_token_set' => ($cfg['webhook_token'] !== ''),
 			'public_base_url' => $cfg['public_base_url'],
 			'last_sync' => ba_last_sync_info()
 		), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		exit;
+	}
+
+	if ($action === 'accounts') {
+		echo json_encode(array('ok' => true, 'accounts' => ba_list_accounts_meta()), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 		exit;
 	}
 

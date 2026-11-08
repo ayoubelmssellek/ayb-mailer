@@ -31,7 +31,8 @@ try {
 		'campaign_name' => isset($in['campaign_name']) ? $in['campaign_name'] : '',
 		'start_date' => isset($in['start_date']) ? $in['start_date'] : '',
 		'end_date' => isset($in['end_date']) ? $in['end_date'] : '',
-		'account_key_hash' => isset($in['account_key_hash']) ? $in['account_key_hash'] : ''
+		'account_key_hash' => isset($in['account_key_hash']) ? $in['account_key_hash'] : '',
+		'account_index' => isset($in['account_index']) ? $in['account_index'] : ''
 	);
 
 	// Preset shortcuts
