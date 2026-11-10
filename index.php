@@ -921,7 +921,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
 
   // —— Analytics overview (Phase 5) ——
-  function aoEsc(s){ return String(s==null?'':s).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c];}); }
+  function aoEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function aoSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
   window.loadAnalyticsOverview=function(){
     var daysEl=document.getElementById('ao-days');
