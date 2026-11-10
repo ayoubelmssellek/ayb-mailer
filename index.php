@@ -9,6 +9,7 @@ require_once __DIR__.DIRECTORY_SEPARATOR.'kumomta_mail.php';
 require_once __DIR__.DIRECTORY_SEPARATOR.'sender_profiles.php';
 require_once __DIR__.DIRECTORY_SEPARATOR.'queue_country.php';
 require_once __DIR__.DIRECTORY_SEPARATOR.'suppression_lib.php';
+require_once __DIR__.DIRECTORY_SEPARATOR.'warmup_lib.php';
 ayb_env_load();
 sender_profiles_ensure();
 // init faker 
@@ -659,6 +660,8 @@ $(document).ready(function(){
     <button type="button" class="sb-link" data-page="recipients">Recipients</button>
     <button type="button" class="sb-link" data-page="compose">Compose</button>
     <button type="button" class="sb-link" data-page="analytics" id="nav-analytics">Analytics</button>
+    <button type="button" class="sb-link" data-page="sendgridmail" id="nav-sendgridmail">SendGridMail</button>
+    <button type="button" class="sb-link" data-page="warmup" id="nav-warmup">Warm-up</button>
   </nav>
   <div class="sb-foot">Setup → Recipients → Compose</div>
 </aside>
@@ -916,6 +919,358 @@ document.addEventListener('DOMContentLoaded', function(){
   if(btnKd) btnKd.onclick=runKumoDiag;
   refreshKumoStatus();
 
+
+  // —— Analytics overview (Phase 5) ——
+  function aoEsc(s){ return String(s==null?'':s).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c];}); }
+  function aoSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
+  window.loadAnalyticsOverview=function(){
+    var daysEl=document.getElementById('ao-days');
+    var days=daysEl?daysEl.value:7;
+    var msg=document.getElementById('ao-msg');
+    if(msg) msg.textContent='Loading overview…';
+    fetch('analytics_overview_api.php?action=overview&days='+encodeURIComponent(days),{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(msg) msg.textContent='Overview failed'; return; }
+      var v=d.vocabulary||{};
+      var vocab=document.getElementById('ao-vocab');
+      if(vocab) vocab.textContent='Accepted: '+(v.accepted||'')+' · Delivered: '+(v.delivered||'')+' · Normal OK: '+(v.ok_smtp||'');
+      var ms=d.methods_status||{};
+      aoSet('ao-sg-ready', ms.sendgrid&&ms.sendgrid.ready?'READY':'NOT READY');
+      aoSet('ao-kumo-ready', ms.kumomta&&ms.kumomta.ready?'READY':'NOT READY');
+      aoSet('ao-socks-ok', ms.normal_smtp&&ms.normal_smtp.ok_proxies!=null?ms.normal_smtp.ok_proxies:'—');
+      var md=document.getElementById('ao-methods-detail');
+      if(md){
+        md.innerHTML='SendGrid: '+aoEsc((ms.sendgrid&&ms.sendgrid.status)||'')+(ms.sendgrid&&ms.sendgrid.err?(' — '+aoEsc(ms.sendgrid.err)):'')+
+          '<br>Kumo: '+aoEsc((ms.kumomta&&(ms.kumomta.host||'')+':'+(ms.kumomta.port||''))||'')+' · '+(ms.kumomta&&ms.kumomta.verify_peer?'TLS verify on':'TLS verify ?')+
+          (ms.kumomta&&ms.kumomta.err?(' — '+aoEsc(ms.kumomta.err)):'')+
+          '<br>SOCKS: '+(ms.normal_smtp&&ms.normal_smtp.note?aoEsc(ms.normal_smtp.note):'');
+      }
+      var kb=document.getElementById('ao-kumo-box');
+      if(kb){
+        var ks=d.kumomta&&d.kumomta.status?d.kumomta.status:{};
+        var tail=d.kumomta&&d.kumomta.log_tail&&d.kumomta.log_tail.rows?d.kumomta.log_tail.rows:[];
+        kb.innerHTML='Status <b>'+aoEsc(ks.status||'unknown')+'</b> · '+(ks.ok?'config ready':'not ready')+(ks.err?(' — '+aoEsc(ks.err)):'')+
+          '<br>Recent log: '+(tail.length?aoEsc((tail[0].line||'').slice(0,160)):'(empty)');
+      }
+      var pf=document.getElementById('ao-profiles');
+      if(pf){
+        var list=(d.profiles&&d.profiles.profiles)||[];
+        pf.textContent=list.length?list.map(function(p){return (p.id||'')+' <'+(p.from_email||'')+'>';}).join(' · '):'No profiles';
+      }
+      var wu=document.getElementById('ao-warmup');
+      if(wu){
+        var w=d.kumomta&&d.kumomta.warmup?d.kumomta.warmup:{};
+        var plan=w.plan||{}; var rem=w.remaining||{}; var today=w.today||{};
+        wu.textContent=(w.global_enabled?'ENABLED':'DISABLED')+' · state '+(plan.state||'?')+' · daily left '+(rem.daily!=null?rem.daily:'—')+' · accepted today '+(today.accepted!=null?today.accepted:'—')+(w.metrics&&w.metrics.reason?(' · '+w.metrics.reason):'');
+      }
+      var qt=document.getElementById('ao-queues');
+      if(qt){
+        var lanes=d.queues||{};
+        var order=['api','smtp','kumomta'];
+        qt.innerHTML=order.map(function(k){
+          var L=lanes[k]||{}; var prog=L.progress||{};
+          return '<tr><td>'+aoEsc(L.method_label||k)+'</td><td>'+((L.valid&&L.valid.count)||0)+'</td><td>'+((L.done&&L.done.count)||0)+'</td><td>'+(L.pending_approx||0)+'</td><td>'+aoEsc(prog.phase||'—')+'</td></tr>';
+        }).join('');
+      }
+      var pr=document.getElementById('ao-providers');
+      if(pr){
+        var rows=d.providers||[];
+        pr.textContent=rows.length?rows.map(function(r){return (r.provider||'?')+': '+(r.accepted||0);}).join(' · '):'No Kumo provider accepts recorded today';
+      }
+      var cn=document.getElementById('ao-compare-note');
+      if(cn) cn.textContent=(d.comparison&&d.comparison.disclaimer)||'';
+      var ct=document.getElementById('ao-compare');
+      if(ct){
+        var methods=(d.comparison&&d.comparison.methods)||[];
+        ct.innerHTML=methods.map(function(m){
+          return '<tr><td>'+aoEsc(m.label)+'</td><td>'+aoEsc(m.primary_metric)+'</td><td>'+(m.primary_value!=null?m.primary_value:'—')+'</td><td>'+aoEsc(m.vocabulary)+'</td></tr>';
+        }).join('');
+      }
+      var th=document.getElementById('ao-throughput');
+      if(th){
+        var t=d.throughput||{};
+        th.textContent='Avg accepted/day '+(t.avg_accepted_per_day!=null?t.avg_accepted_per_day:'—')+' · peak '+(t.peak_accepted!=null?t.peak_accepted:'—')+(t.note?(' — '+t.note):'');
+      }
+      if(msg) msg.textContent='Overview updated '+((d.generated_at)||'');
+    }).catch(function(){ if(msg) msg.textContent='Overview request failed'; });
+  };
+  function loadAoLogs(){
+    var src=document.getElementById('ao-log-source');
+    var q=document.getElementById('ao-log-q');
+    var tb=document.getElementById('ao-logs');
+    var url='analytics_overview_api.php?action=logs&source='+encodeURIComponent(src?src.value:'kumomta')+'&q='+encodeURIComponent(q?q.value:'')+'&limit=80';
+    if(tb) tb.innerHTML='<tr><td>Loading…</td></tr>';
+    fetch(url,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!tb) return;
+      var rows=(d&&d.rows)||[];
+      if(!rows.length){ tb.innerHTML='<tr><td style="color:#8b9bb0">'+(d&&d.exists===false?'Log file missing':'No matches')+'</td></tr>'; return; }
+      tb.innerHTML=rows.map(function(r){ return '<tr><td style="font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap">'+aoEsc(r.line||'')+'</td></tr>'; }).join('');
+    }).catch(function(){ if(tb) tb.innerHTML='<tr><td>Log request failed</td></tr>'; });
+  }
+  var btnAo=document.getElementById('btn-ao-refresh');
+  if(btnAo) btnAo.onclick=function(){ window.loadAnalyticsOverview(); };
+  var btnAoL=document.getElementById('btn-ao-logs');
+  if(btnAoL) btnAoL.onclick=loadAoLogs;
+  var btnAoW=document.getElementById('btn-ao-goto-warmup');
+  if(btnAoW) btnAoW.onclick=function(){ if(typeof showPage==='function') showPage('warmup'); };
+  if(document.getElementById('analytics-overview-card')) window.loadAnalyticsOverview();
+
+  // —— SendGridMail multi-country delivered export ——
+  window.__sgmPage=1;
+  window.__sgmSelected={};
+  function sgmEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function sgmSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
+  function sgmFmt(n){ n=parseInt(n,10); if(isNaN(n)) return '—'; return n.toLocaleString('en-US'); }
+  function sgmCountry(){
+    var sel=document.getElementById('sgm-country');
+    if(sel && sel.value) return String(sel.value).toLowerCase();
+    return (window.aybCountry ? window.aybCountry() : 'pt');
+  }
+  function sgmKnownParam(){
+    var codes=[];
+    try{
+      if(window.aybCountryList){ codes=window.aybCountryList(); }
+      else if(typeof countryState!=='undefined' && countryState.list){ codes=Object.keys(countryState.list); }
+    }catch(e){}
+    ['pt','es','fr','de'].forEach(function(c){ if(codes.indexOf(c)<0) codes.push(c); });
+    return codes.join(',');
+  }
+  function sgmCopyText(text, msg){
+    var note=document.getElementById('sgm-msg');
+    function ok(){ if(note) note.textContent=msg||'Copied.'; }
+    function fail(){ if(note) note.textContent='Copy failed — select manually.'; }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(ok).catch(fail);
+      return;
+    }
+    try{
+      var ta=document.createElement('textarea');
+      ta.value=text; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta); ok();
+    }catch(e){ fail(); }
+  }
+  function sgmBucketPill(bucket){
+    if(bucket==='delivered_eligible') return '<span class="ra-pill ok">Delivered</span>';
+    if(bucket==='bounced') return '<span class="ra-pill fail">Bounced</span>';
+    if(bucket==='blocked_dropped') return '<span class="ra-pill fail">Blocked/Dropped</span>';
+    return '<span class="ra-pill mute">Excluded/Unknown</span>';
+  }
+  function sgmFillCountries(list){
+    var sel=document.getElementById('sgm-country');
+    if(!sel) return;
+    var cur=sel.value || sgmCountry();
+    var map={};
+    (list||[]).forEach(function(c){ if(c && c.code) map[c.code]=c; });
+    ['pt','es','fr','de'].forEach(function(c){ if(!map[c]) map[c]={code:c,has_valid:false,has_done:false}; });
+    var codes=Object.keys(map);
+    codes.sort(function(a,b){ if(a==='pt') return -1; if(b==='pt') return 1; return a.localeCompare(b); });
+    sel.innerHTML='';
+    codes.forEach(function(code){
+      var opt=document.createElement('option');
+      opt.value=code;
+      var info=map[code]||{};
+      var mark=(info.has_valid||info.has_done)?'':' (no queue files)';
+      opt.textContent=code.toUpperCase()+mark;
+      if(code===cur) opt.selected=true;
+      sel.appendChild(opt);
+    });
+  }
+  window.loadSendGridMail=function(){
+    var qEl=document.getElementById('sgm-q');
+    var stEl=document.getElementById('sgm-bucket');
+    var tb=document.getElementById('sgm-tbody');
+    var note=document.getElementById('sgm-ref-note');
+    var msg=document.getElementById('sgm-msg');
+    var page=window.__sgmPage||1;
+    var q=qEl?qEl.value:'';
+    var bucket=stEl?stEl.value:'all';
+    var cc=sgmCountry();
+    var url='sendgrid_mail_api.php?action=recipients&country='+encodeURIComponent(cc)+'&known='+encodeURIComponent(sgmKnownParam())+'&page='+encodeURIComponent(page)+'&per_page=50&q='+encodeURIComponent(q)+'&bucket='+encodeURIComponent(bucket);
+    if(msg) msg.textContent='Loading…';
+    fetch(url,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(msg) msg.textContent=(d&&d.err)?d.err:'SendGridMail load failed'; if(tb) tb.innerHTML='<tr><td colspan="6" style="color:#ff5d6c">Failed to load</td></tr>'; return; }
+      var st=d.stats||{};
+      sgmSet('sgm-delivered', sgmFmt(st.delivered_eligible));
+      sgmSet('sgm-bounced', sgmFmt(st.bounced));
+      sgmSet('sgm-blocked', sgmFmt(st.blocked_dropped));
+      sgmSet('sgm-excluded', sgmFmt(st.excluded_unknown));
+      fetch('sendgrid_mail_api.php?action=countries&known='+encodeURIComponent(sgmKnownParam()),{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
+        if(c&&c.ok) sgmFillCountries(c.countries||[]);
+      }).catch(function(){});
+      var bits=[];
+      bits.push('Country '+String(d.country||cc).toUpperCase()+' · lane api');
+      bits.push('Source: '+(d.delivery_source||'sg_messages.status=delivered'));
+      bits.push('Files: '+(d.files&&d.files.valid_name?d.files.valid_name:'?')+' + '+(d.files&&d.files.done_name?d.files.done_name:'?'));
+      if(d.evidence && d.evidence.truncated) bits.push('Email Activity may be truncated.');
+      if(d.notes&&d.notes.length) bits.push(d.notes[d.notes.length-1]);
+      if(note) note.textContent=bits.join(' ');
+      window.__sgmPage=d.page||1;
+      window.__sgmPages=d.pages||1;
+      var pg=document.getElementById('sgm-page');
+      if(pg) pg.textContent='Page '+(d.page||1)+' / '+(d.pages||1)+' · '+sgmFmt(d.total)+' rows';
+      var rows=d.rows||[];
+      if(!tb) return;
+      if(!rows.length){
+        tb.innerHTML='<tr><td colspan="6" style="color:#8b9bb0">No recipients for this country/filter. Need api queue membership + Sync from SendGrid with delivered evidence.</td></tr>';
+      }else{
+        var html='';
+        for(var i=0;i<rows.length;i++){
+          var row=rows[i];
+          var checked=window.__sgmSelected[row.email]?' checked':'';
+          var dis=row.eligible?'':' disabled';
+          html+='<tr>';
+          html+='<td><input type="checkbox" data-sgm-sel="'+sgmEsc(row.email)+'"'+(row.eligible?'':' title="Not eligible"')+dis+checked+'></td>';
+          html+='<td><a class="ra-email" href="#" data-sgm-email="'+sgmEsc(row.email)+'">'+sgmEsc(row.email)+'</a></td>';
+          html+='<td>'+sgmBucketPill(row.bucket)+'</td>';
+          html+='<td>'+sgmEsc(row.reason||'')+'</td>';
+          html+='<td>'+sgmEsc(row.provider_status||'—')+'</td>';
+          html+='<td><button type="button" class="sd-btn" data-sgm-copy="'+sgmEsc(row.email)+'"'+(row.eligible?'':' disabled')+'>Copy</button></td>';
+          html+='</tr>';
+        }
+        tb.innerHTML=html;
+      }
+      if(msg) msg.textContent='Loaded SendGridMail for '+String(d.country||cc).toUpperCase()+' (delivered-only export rules).';
+    }).catch(function(){ if(msg) msg.textContent='SendGridMail request failed'; });
+  };
+  function sgmCopyEligible(){
+    var cc=sgmCountry();
+    var qEl=document.getElementById('sgm-q');
+    var q=qEl?qEl.value:'';
+    var msg=document.getElementById('sgm-msg');
+    if(msg) msg.textContent='Preparing eligible list…';
+    fetch('sendgrid_mail_api.php?action=emails&country='+encodeURIComponent(cc)+'&q='+encodeURIComponent(q),{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(msg) msg.textContent='Copy eligible failed'; return; }
+      var emails=d.emails||[];
+      if(!emails.length){ if(msg) msg.textContent='No verified delivered-eligible emails for '+cc.toUpperCase()+'.'; return; }
+      sgmCopyText(emails.join('\n'), 'Copied '+emails.length.toLocaleString('en-US')+' eligible address(es) for '+cc.toUpperCase()+'.');
+    }).catch(function(){ if(msg) msg.textContent='Copy eligible request failed'; });
+  }
+  function sgmCopySelected(){
+    var emails=[];
+    Object.keys(window.__sgmSelected||{}).forEach(function(e){ if(window.__sgmSelected[e]) emails.push(e); });
+    emails.sort();
+    if(!emails.length){ var m=document.getElementById('sgm-msg'); if(m) m.textContent='No eligible rows selected.'; return; }
+    sgmCopyText(emails.join('\n'), 'Copied '+emails.length+' selected address(es).');
+  }
+  var btnSgmLoad=document.getElementById('btn-sgm-load');
+  if(btnSgmLoad) btnSgmLoad.onclick=function(){ window.__sgmPage=1; window.__sgmSelected={}; window.loadSendGridMail(); };
+  var btnSgmPrev=document.getElementById('btn-sgm-prev');
+  if(btnSgmPrev) btnSgmPrev.onclick=function(){ window.__sgmPage=Math.max(1,(window.__sgmPage||1)-1); window.loadSendGridMail(); };
+  var btnSgmNext=document.getElementById('btn-sgm-next');
+  if(btnSgmNext) btnSgmNext.onclick=function(){ window.__sgmPage=Math.min((window.__sgmPages||1),(window.__sgmPage||1)+1); window.loadSendGridMail(); };
+  var btnSgmElig=document.getElementById('btn-sgm-copy-eligible');
+  if(btnSgmElig) btnSgmElig.onclick=sgmCopyEligible;
+  var btnSgmSel=document.getElementById('btn-sgm-copy-selected');
+  if(btnSgmSel) btnSgmSel.onclick=sgmCopySelected;
+  var btnSgmAllElig=document.getElementById('btn-sgm-select-eligible');
+  if(btnSgmAllElig) btnSgmAllElig.onclick=function(){
+    var boxes=document.querySelectorAll('#sgm-tbody input[data-sgm-sel]:not(:disabled)');
+    for(var i=0;i<boxes.length;i++){ boxes[i].checked=true; window.__sgmSelected[boxes[i].getAttribute('data-sgm-sel')]=true; }
+    var m=document.getElementById('sgm-msg'); if(m) m.textContent='Selected all eligible on this page.';
+  };
+  var btnSgmExport=document.getElementById('btn-sgm-export');
+  if(btnSgmExport) btnSgmExport.onclick=function(){
+    var cc=sgmCountry();
+    var qEl=document.getElementById('sgm-q');
+    var q=qEl?qEl.value:'';
+    window.location.href='sendgrid_mail_api.php?action=export&country='+encodeURIComponent(cc)+'&q='+encodeURIComponent(q);
+  };
+  var sgmCountrySel=document.getElementById('sgm-country');
+  if(sgmCountrySel) sgmCountrySel.onchange=function(){ window.__sgmPage=1; window.__sgmSelected={}; window.loadSendGridMail(); };
+  var sgmTb=document.getElementById('sgm-tbody');
+  if(sgmTb) sgmTb.addEventListener('click', function(ev){
+    var t=ev.target;
+    if(!t) return;
+    if(t.getAttribute && t.getAttribute('data-sgm-sel')!=null){
+      var em=t.getAttribute('data-sgm-sel');
+      if(t.checked) window.__sgmSelected[em]=true; else delete window.__sgmSelected[em];
+      return;
+    }
+    var copy=t.getAttribute && t.getAttribute('data-sgm-copy');
+    if(copy){ ev.preventDefault(); sgmCopyText(copy, 'Copied '+copy); return; }
+    var em2=t.getAttribute && t.getAttribute('data-sgm-email');
+    if(em2){ ev.preventDefault(); sgmCopyText(em2, 'Copied '+em2); }
+  });
+  var sgmQ=document.getElementById('sgm-q');
+  if(sgmQ) sgmQ.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ window.__sgmPage=1; window.loadSendGridMail(); } });
+
+  // —— Warm-up (Phase 4) ——
+  function wuEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function wuSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
+  function loadWarmup(){
+    var msg=document.getElementById('wu-msg');
+    var box=document.getElementById('warmup-status-box');
+    fetch('warmup_api.php?action=status&method=kumomta',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(box) box.textContent='Warm-up status failed'; return; }
+      var p=d.plan||{};
+      var rem=d.remaining||{};
+      var day=d.today||{};
+      if(box){
+        box.textContent=(d.global_enabled?'ENABLED':'DISABLED')+' · plan '+(p.enabled?'on':'off')+' · daily cap '+(p.current_daily_cap||0)+' · hourly '+(p.hourly_cap||0)+(d.emergency_stop?' · EMERGENCY STOP FLAG':'')+(d.metrics&&d.metrics.reason?(' · '+d.metrics.reason):'');
+      }
+      wuSet('wu-daily-left', rem.daily);
+      wuSet('wu-hourly-left', rem.hourly);
+      wuSet('wu-accepted', day.accepted);
+      wuSet('wu-state', p.state);
+      var dc=document.getElementById('wu-daily-cap'); if(dc) dc.value=p.current_daily_cap||50;
+      var hc=document.getElementById('wu-hourly-cap'); if(hc) hc.value=p.hourly_cap||20;
+      var pend=document.getElementById('wu-pending');
+      if(pend){
+        var rows=d.pending_increases||[];
+        if(!rows.length) pend.textContent='None';
+        else pend.innerHTML=rows.map(function(r){
+          return '#'+r.id+' → daily '+r.requested_daily_cap+' / hourly '+r.requested_hourly_cap+' — '+wuEsc(r.reason||'')+
+            ' <button type="button" class="sd-btn wu-approve" data-id="'+r.id+'">Approve</button>'+
+            ' <button type="button" class="sd-btn wu-reject" data-id="'+r.id+'">Reject</button>';
+        }).join('<br>');
+      }
+      var tb=document.getElementById('wu-decisions');
+      if(tb){
+        var dec=d.decisions||[];
+        if(!dec.length) tb.innerHTML='<tr><td colspan="4" style="color:#8b9bb0">No decisions yet.</td></tr>';
+        else tb.innerHTML=dec.map(function(x){
+          return '<tr><td>'+wuEsc(x.created_at)+'</td><td>'+wuEsc(x.action)+'</td><td>'+wuEsc(x.reason)+'</td><td>'+wuEsc(x.actor)+'</td></tr>';
+        }).join('');
+      }
+      if(msg) msg.textContent='Updated';
+    }).catch(function(){ if(box) box.textContent='Warm-up request failed'; });
+  }
+  function wuPost(action, fields){
+    var fd=new FormData();
+    fd.append('action', action);
+    fd.append('method','kumomta');
+    if(fields){ Object.keys(fields).forEach(function(k){ fd.append(k, fields[k]); }); }
+    return fetch('warmup_api.php',{method:'POST',body:fd,cache:'no-store'}).then(function(r){return r.json();});
+  }
+  var btnWuR=document.getElementById('btn-wu-refresh');
+  if(btnWuR) btnWuR.onclick=loadWarmup;
+  var btnWuSave=document.getElementById('btn-wu-save-caps');
+  if(btnWuSave) btnWuSave.onclick=function(){
+    var d=document.getElementById('wu-daily-cap');
+    var h=document.getElementById('wu-hourly-cap');
+    wuPost('update',{current_daily_cap:d?d.value:50, hourly_cap:h?h.value:20, reason:'Dashboard cap change'}).then(function(){ loadWarmup(); });
+  };
+  function wuState(st){ wuPost('set_state',{state:st, reason:'Dashboard → '+st}).then(function(){ loadWarmup(); }); }
+  var bA=document.getElementById('btn-wu-active'); if(bA) bA.onclick=function(){ wuState('active'); };
+  var bP=document.getElementById('btn-wu-pause'); if(bP) bP.onclick=function(){ wuState('paused'); };
+  var bH=document.getElementById('btn-wu-hold'); if(bH) bH.onclick=function(){ wuState('hold'); };
+  var bS=document.getElementById('btn-wu-stop'); if(bS) bS.onclick=function(){ wuState('stopped'); };
+  var bE=document.getElementById('btn-wu-emerg'); if(bE) bE.onclick=function(){ wuPost('emergency_stop',{}).then(function(){ loadWarmup(); }); };
+  var bC=document.getElementById('btn-wu-clear-emerg'); if(bC) bC.onclick=function(){ wuPost('clear_emergency',{}).then(function(){ loadWarmup(); }); };
+  document.addEventListener('click', function(ev){
+    var t=ev.target; if(!t||!t.classList) return;
+    if(t.classList.contains('wu-approve')){
+      wuPost('approve_increase',{pending_id:t.getAttribute('data-id')}).then(function(d){
+        var msg=document.getElementById('wu-msg');
+        if(msg) msg.textContent=d&&d.ok?'Approved':(d&&d.err?d.err:'Approve failed');
+        loadWarmup();
+      });
+    }
+    if(t.classList.contains('wu-reject')){
+      wuPost('reject_increase',{pending_id:t.getAttribute('data-id'), detail:'UI reject'}).then(function(){ loadWarmup(); });
+    }
+  });
+  if(document.getElementById('warmup-card')) loadWarmup();
+
   // —— Global suppressions (Phase 3) ——
   window.__suppPage=1;
   function suppEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -1125,7 +1480,9 @@ document.addEventListener('DOMContentLoaded', function(){
     setup:{title:'Setup', sub:'Mode, accounts, and SOCKS — everything to connect'},
     recipients:{title:'Recipients', sub:'The highlighted list is the one Send uses'},
     compose:{title:'Compose', sub:'Write the email, set pace, then send'},
-    analytics:{title:'Analytics', sub:'SendGrid API sync (local SQLite, not real-time)'}
+    analytics:{title:'Analytics', sub:'Methods overview · Accepted ≠ Delivered · SendGrid sync · suppressions'},
+    sendgridmail:{title:'SendGridMail', sub:'Multi-country · verified delivered only · VPS TXT export'},
+    warmup:{title:'Warm-up', sub:'KumoMTA caps, states, and manual increase approval'}
   };
   // Map old empty pages → dense ones
   var PAGE_ALIAS={mode:'setup', connections:'setup', message:'compose', send:'compose'};
@@ -1152,6 +1509,9 @@ document.addEventListener('DOMContentLoaded', function(){
     }
     var side=document.getElementById('app-sidebar');
     if(side) side.classList.remove('open');
+    if(name==='analytics' && typeof window.loadAnalyticsOverview==='function') window.loadAnalyticsOverview();
+    if(name==='sendgridmail' && typeof window.loadSendGridMail==='function') window.loadSendGridMail();
+    if(name==='warmup' && typeof loadWarmup==='function') loadWarmup();
   }
   window.showAppPage=showPage;
   var nav=document.getElementById('app-nav');
@@ -1713,6 +2073,75 @@ document.addEventListener('DOMContentLoaded', function(){
   </div>
 
   <div class="nav-page" id="page-analytics">
+  <section class="setup-card" id="analytics-overview-card">
+    <h3>Operations overview</h3>
+    <div class="hint" style="margin:0 0 10px"><b>Accepted ≠ Delivered.</b> SendGrid “delivered” (when synced) is not the same as Kumo/Normal SMTP accept/OK. Phase 2 unified message ledger was skipped — this overview reads each method’s own stores.</div>
+    <div class="ra-filters" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <select id="ao-days" title="Range for SendGrid + Kumo series">
+        <option value="1">Today</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <button type="button" class="sd-btn" id="btn-ao-refresh">Refresh overview</button>
+      <button type="button" class="sd-btn" id="btn-ao-goto-warmup">Open Warm-up</button>
+    </div>
+    <div id="ao-vocab" class="sd-note" style="margin-bottom:10px">Loading vocabulary…</div>
+    <h4 style="margin:12px 0 8px">1. Sending methods</h4>
+    <div class="sd-overview" style="grid-template-columns:repeat(3,1fr)">
+      <div class="sd-kpi"><b id="ao-sg-ready">—</b><span>SendGrid</span></div>
+      <div class="sd-kpi"><b id="ao-kumo-ready">—</b><span>KumoMTA</span></div>
+      <div class="sd-kpi"><b id="ao-socks-ok">—</b><span>SOCKS OK proxies</span></div>
+    </div>
+    <div id="ao-methods-detail" class="hint" style="margin-top:8px"></div>
+
+    <h4 style="margin:16px 0 8px">2. KumoMTA status</h4>
+    <div id="ao-kumo-box" class="sd-note">Loading…</div>
+
+    <h4 style="margin:16px 0 8px">3. Sender profiles</h4>
+    <div id="ao-profiles" class="sd-note">Loading…</div>
+
+    <h4 style="margin:16px 0 8px">4. Warm-up summary</h4>
+    <div id="ao-warmup" class="sd-note">Loading…</div>
+
+    <h4 style="margin:16px 0 8px">5. Campaign / queue lanes</h4>
+    <div class="ra-table-wrap">
+      <table class="ra-table">
+        <thead><tr><th>Lane</th><th>Valid</th><th>Done</th><th>Pending≈</th><th>Last progress</th></tr></thead>
+        <tbody id="ao-queues"><tr><td colspan="5" style="color:#8b9bb0">Refresh overview…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h4 style="margin:16px 0 8px">6. Provider split (Kumo today)</h4>
+    <div id="ao-providers" class="sd-note">Loading…</div>
+
+    <h4 style="margin:16px 0 8px">7. Method comparison</h4>
+    <div id="ao-compare-note" class="hint" style="margin:0 0 8px"></div>
+    <div class="ra-table-wrap">
+      <table class="ra-table">
+        <thead><tr><th>Method</th><th>Primary metric</th><th>Value</th><th>Vocabulary</th></tr></thead>
+        <tbody id="ao-compare"><tr><td colspan="4" style="color:#8b9bb0">Refresh overview…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h4 style="margin:16px 0 8px">8. Searchable provider logs</h4>
+    <div class="hint" style="margin:0 0 8px">Searches <code>data/kumomta.log</code> / <code>data/sendgrid.log</code> only — not a cross-provider message DB.</div>
+    <div class="ra-filters" style="flex-wrap:wrap;gap:8px">
+      <select id="ao-log-source"><option value="kumomta">KumoMTA log</option><option value="sendgrid">SendGrid log</option></select>
+      <input type="search" id="ao-log-q" placeholder="Filter text…" style="min-width:180px">
+      <button type="button" class="sd-btn" id="btn-ao-logs">Search logs</button>
+    </div>
+    <div class="ra-table-wrap" style="margin-top:8px;max-height:260px;overflow:auto">
+      <table class="ra-table">
+        <thead><tr><th>Line</th></tr></thead>
+        <tbody id="ao-logs"><tr><td style="color:#8b9bb0">No log query yet.</td></tr></tbody>
+      </table>
+    </div>
+
+    <h4 style="margin:16px 0 8px">10. Local throughput (Kumo warm-up)</h4>
+    <div id="ao-throughput" class="sd-note">Loading…</div>
+    <div class="sd-msg" id="ao-msg"></div>
+  </section>
+
   <section class="setup-card mode-only-sendgrid" style="<?php if($smtp_mode!=='sendgrid') echo 'display:none'; ?>">
     <h3>SendGrid analytics (API sync)</h3>
     <div class="sd-note" style="margin-bottom:12px">
@@ -1803,7 +2232,7 @@ document.addEventListener('DOMContentLoaded', function(){
   </section>
 
   <section class="setup-card" id="global-suppression-card">
-    <h3>Global suppressions</h3>
+    <h3>9. Global suppressions</h3>
     <div class="hint" style="margin:0 0 10px">Shared across SendGrid, Normal+SOCKS, and KumoMTA. Pre-send blocks suppressed addresses. Soft-bounce auto-suppress is configurable in <code>.env</code>. See <code>docs/SUPPRESSION.md</code>.</div>
     <div class="sd-overview" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px">
       <div class="sd-kpi"><b id="supp-total">—</b><span>Total</span></div>
@@ -1846,6 +2275,105 @@ document.addEventListener('DOMContentLoaded', function(){
     </div>
     <div class="sd-msg" id="supp-msg"></div>
     <div class="hint" style="margin-top:8px">Kumo marketing sends include <code>List-Unsubscribe</code> when configured. Set <code>UNSUBSCRIBE_BASE_URL</code> + <code>UNSUBSCRIBE_SECRET</code> in <code>.env</code> for one-click links.</div>
+  </section>
+  </div>
+
+  <div class="nav-page" id="page-sendgridmail">
+  <section class="setup-card stats-dash" id="sendgridmail-card">
+    <h3>SendGridMail — verified delivered export</h3>
+    <div class="sd-note" style="margin-bottom:12px">
+      Multi-country SendGrid <b>api</b> lane. Country from queue files (<code>validmails[_cc].txt</code>), not domains.
+      Export/copy includes <b>only</b> addresses with <code>sg_messages.status=delivered</code> after consent checks.
+      Unsubscribe, spam complaint, and global suppressions <b>always override</b> historical delivered.
+      <code>mailssenddone</code> alone is <b>not</b> delivery. No sending from this page.
+    </div>
+    <div class="sd-overview" style="grid-template-columns:repeat(4,1fr)">
+      <div class="sd-kpi ok"><b id="sgm-delivered">—</b><span>Delivered eligible</span></div>
+      <div class="sd-kpi fail"><b id="sgm-bounced">—</b><span>Bounced</span></div>
+      <div class="sd-kpi fail"><b id="sgm-blocked">—</b><span>Blocked / dropped</span></div>
+      <div class="sd-kpi"><b id="sgm-excluded">—</b><span>Excluded / unknown</span></div>
+    </div>
+    <div id="sgm-ref-note" class="sd-note">Select a country and Refresh. Sync SendGrid analytics first for delivery evidence.</div>
+    <div class="ra-filters" style="flex-wrap:wrap;gap:8px">
+      <select id="sgm-country" title="Country">
+        <option value="pt">PT</option>
+        <option value="es">ES</option>
+        <option value="fr">FR</option>
+        <option value="de">DE</option>
+      </select>
+      <input type="search" id="sgm-q" placeholder="Search email…" style="min-width:200px">
+      <select id="sgm-bucket">
+        <option value="all">All buckets</option>
+        <option value="delivered_eligible">Delivered eligible</option>
+        <option value="bounced">Bounced</option>
+        <option value="blocked_dropped">Blocked / dropped</option>
+        <option value="excluded_unknown">Excluded / unknown</option>
+      </select>
+      <button type="button" class="sd-btn" id="btn-sgm-load">Refresh</button>
+      <button type="button" class="sd-btn" id="btn-sgm-prev">Prev</button>
+      <button type="button" class="sd-btn" id="btn-sgm-next">Next</button>
+      <span id="sgm-page" style="margin-left:4px;color:var(--s-muted)">Page 1</span>
+    </div>
+    <div class="ra-actions">
+      <button type="button" class="sd-btn" id="btn-sgm-select-eligible">Select all eligible (page)</button>
+      <button type="button" class="sd-btn" id="btn-sgm-copy-selected">Copy selected</button>
+      <button type="button" class="sd-btn" id="btn-sgm-copy-eligible">Copy all eligible</button>
+      <button type="button" class="sd-btn" id="btn-sgm-export">Export eligible TXT</button>
+    </div>
+    <div class="ra-table-wrap">
+      <table class="ra-table" style="min-width:720px">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Email</th>
+            <th>Bucket</th>
+            <th>Reason</th>
+            <th>Provider status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="sgm-tbody"><tr><td colspan="6" style="color:#8b9bb0">Open this page to load SendGridMail.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="sd-msg" id="sgm-msg"></div>
+  </section>
+  </div>
+
+  <div class="nav-page" id="page-warmup">
+  <section class="setup-card" id="warmup-card">
+    <h3>KumoMTA warm-up</h3>
+    <div class="hint" style="margin:0 0 10px">Governor applies to <b>campaign</b> Kumo sends only (test list skips caps). Caps never auto-increase — pending increases need Approve. Bad metrics → cooldown with a stored reason. See <code>docs/WARMUP.md</code>.</div>
+    <div id="warmup-status-box" class="sd-note">Loading warm-up status…</div>
+    <div class="sd-overview" style="grid-template-columns:repeat(4,1fr);margin:12px 0">
+      <div class="sd-kpi"><b id="wu-daily-left">—</b><span>Daily left</span></div>
+      <div class="sd-kpi"><b id="wu-hourly-left">—</b><span>Hourly left</span></div>
+      <div class="sd-kpi"><b id="wu-accepted">—</b><span>Accepted today</span></div>
+      <div class="sd-kpi fail"><b id="wu-state">—</b><span>State</span></div>
+    </div>
+    <div class="ra-filters" style="flex-wrap:wrap;gap:8px">
+      <label>Daily cap <input type="number" id="wu-daily-cap" min="1" style="width:90px"></label>
+      <label>Hourly cap <input type="number" id="wu-hourly-cap" min="1" style="width:90px"></label>
+      <button type="button" class="sd-btn" id="btn-wu-save-caps">Save / request increase</button>
+      <button type="button" class="sd-btn" id="btn-wu-refresh">Refresh</button>
+    </div>
+    <div class="ra-filters" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+      <button type="button" class="sd-btn" id="btn-wu-active">Resume active</button>
+      <button type="button" class="sd-btn" id="btn-wu-pause">Pause</button>
+      <button type="button" class="sd-btn" id="btn-wu-hold">Hold</button>
+      <button type="button" class="sd-btn" id="btn-wu-stop">Stop plan</button>
+      <button type="button" class="sd-btn" id="btn-wu-emerg" style="background:#c0392b;color:#fff">Emergency stop</button>
+      <button type="button" class="sd-btn" id="btn-wu-clear-emerg">Clear stop flag</button>
+    </div>
+    <div class="hint" style="margin-top:10px"><b>Pending increases</b></div>
+    <div id="wu-pending" class="sd-note">None</div>
+    <div class="hint" style="margin-top:10px"><b>Decisions log</b></div>
+    <div class="ra-table-wrap">
+      <table class="ra-table">
+        <thead><tr><th>When</th><th>Action</th><th>Reason</th><th>Actor</th></tr></thead>
+        <tbody id="wu-decisions"><tr><td colspan="4" style="color:#8b9bb0">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="sd-msg" id="wu-msg"></div>
   </section>
   </div>
 
@@ -2356,6 +2884,11 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   }
   window.aybCountry=function(){ return countryState.active || 'pt'; };
+  window.aybCountryList=function(){
+    var codes=Object.keys(countryState.list||{});
+    if(codes.indexOf('pt')<0) codes.push('pt');
+    return codes;
+  };
   window.__countryRemember=countryRemember;
   if(document.getElementById('proxy-test-panel')) countryBoot();
 })();
@@ -10052,6 +10585,13 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 	$sessionOk = array();
 	$variantSlot = 0;
 
+	if(!$isTestSend && function_exists('warmup_status'))
+	{
+		$wu0 = warmup_status('kumomta');
+		$wuRem = isset($wu0['remaining']) ? $wu0['remaining'] : array();
+		dash_log('info', 'Warm-up: state '.(isset($wu0['plan']['state']) ? $wu0['plan']['state'] : '?').' · daily left '.(isset($wuRem['daily']) ? $wuRem['daily'] : '?').' · hourly left '.(isset($wuRem['hourly']) ? $wuRem['hourly'] : '?'));
+	}
+
 	for($x = 1; $x <= $numemails; $x++)
 	{
 		if(send_stop_requested())
@@ -10072,6 +10612,31 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			die();
 		}
 		$to = preg_replace('/\s+/', '', $allemails[$x - 1]);
+		if(!$isTestSend && function_exists('warmup_allow_send'))
+		{
+			$wu = warmup_allow_send('kumomta', $to);
+			if(empty($wu['ok']))
+			{
+				$wuErr = isset($wu['err']) ? $wu['err'] : 'warm-up blocked';
+				if(!empty($wu['skip_recipient']))
+				{
+					dash_log('warn', 'WARM-UP SKIP '.$to.' — '.$wuErr);
+					dash_js('dashFail();');
+					continue;
+				}
+				$left = count($pendingAll) - count($sessionOk);
+				mail_queue_save_progress(array(
+					'phase' => 'warmup_halt',
+					'session_ok' => count($sessionOk),
+					'pending_left' => $left,
+					'reason' => $wuErr
+				));
+				dash_log('warn', 'WARM-UP HALT — '.$wuErr.' · OK this run: '.count($sessionOk).' · pending left: '.$left);
+				dash_js("dashDone('Warm-up halt');");
+				send_mark_stopped();
+				die();
+			}
+		}
 		$realname = preg_replace_callback('/(##([a-zA-Z0-9\-]+)\{([0-9]+)\}##)/', 'generateRandomString', $realname_base);
 		if(isset($_POST['rndname'])) $realname = $faker->name;
 		$cv = content_variant_for_slot($variantSlot, false);
@@ -10109,6 +10674,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			dash_log('ok', 'ACCEPTED '.$to.$extra.' (SMTP accept ≠ delivered)');
 			dash_js('dashOk();');
 			if(!$isTestSend) mail_queue_mark_done($to);
+			if(!$isTestSend && function_exists('warmup_record_outcome')) warmup_record_outcome('kumomta', $to, 'accepted');
 			$sessionOk[] = $to;
 			if(!$isTestSend && count($sessionOk) % 25 === 0)
 			{
@@ -10126,6 +10692,7 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			dash_log('warn', 'EXCLUDED '.$to.' — '.$lastErr.' (marked done — will not retry)');
 			dash_js('dashFail();');
 			if(!$isTestSend) mail_queue_mark_done($to);
+			if(!$isTestSend && function_exists('warmup_record_outcome')) warmup_record_outcome('kumomta', $to, 'excluded');
 		}
 		else
 		{
@@ -10133,6 +10700,8 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			$st = isset($r['status']) ? $r['status'] : 'failed';
 			dash_log('fail', 'FAIL '.$to.' — '.$lastErr.' ['.$st.']'.($isTestSend ? '' : ' (not marked done — will retry next run)'));
 			dash_js('dashFail();');
+			if(!$isTestSend && function_exists('warmup_record_outcome'))
+				warmup_record_outcome('kumomta', $to, 'failed', array('smtp_code' => isset($r['smtp_code']) ? $r['smtp_code'] : ''));
 			if($st === 'configuration_error')
 			{
 				dash_log('fail', 'KumoMTA configuration error — stopping batch.');

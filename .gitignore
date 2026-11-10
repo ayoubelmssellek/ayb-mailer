@@ -48,6 +48,8 @@
 /data/sender_profiles.json
 /data/suppressions.sqlite
 /data/suppressions.sqlite-*
+/data/warmup.sqlite
+/data/warmup.sqlite-*
 /exclude_*.txt
 
 /data/brevo_analytics.sqlite

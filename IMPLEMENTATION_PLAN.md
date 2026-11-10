@@ -1,6 +1,7 @@
 # AYB Mailer — Implementation Plan
 
-**Status:** Phase 0 done · Phase 1 done · Phase 2 SKIPPED · **Phase 3 done (2026-11-10)** · awaiting explicit approval before Phase 4+  
+**Status:** Phase 0 done · Phase 1 done · Phase 2 SKIPPED · Phase 3 done · Phase 4 done · Phase 5 done · **Phase 6 in progress / largely complete (2026-11-10)** — SQLite optimization EXCLUDED; Brevo data deleted; SendGridMail PT shipped; perf docs without mass send  
+
 **Created:** 2026-11-10  
 **Based on:** Analysis-only audit of `c:\Users\dell\Desktop\Mailer\ayb-mailer`  
 **Scope of this document:** Technical plan, phases, steps, files, tests, risks, Brevo removal inventory  
@@ -90,9 +91,9 @@ Shared services (new)
 | **1** | KumoMTA third method | Independent mode, env config, profiles, diagnostics, queue lane | Done |
 | **2** | Unified message logging | Per-message event ledger for all three methods | **SKIPPED** — do not implement |
 | **3** | Bounce / suppression / unsub | Global pre-send gates + policies | Done (no Phase 2 dependency) |
-| **4** | Warm-up engine | Data-driven limits, pause/hold/stop, manual increase approval | Awaiting approval |
-| **5** | Analytics dashboard | Campaign / provider / method / historical views | Awaiting approval |
-| **6** | Performance & scaling | Validate reliability; progressive scale toward 20–25k/day | Awaiting approval |
+| **4** | Warm-up engine | Data-driven limits, pause/hold/stop, manual increase approval | Done |
+| **5** | Analytics dashboard | Campaign / provider / method / historical views | Done (no Phase 2 ledger) |
+| **6** | Performance & scaling | Validate reliability; progressive scale toward 20–25k/day | **Approved with mods** — no SQLite opts; Brevo data cleanup done; SendGridMail PT added; perf docs + controlled-test plan (no mass send) |
 
 **Recommended execution order (updated):** 0 → 1 → ~~2~~ → 3 → 4 → 5 → 6  
 Phase 2 is waived. Prefer **KumoMTA/VPS-native** monitoring and logs over a cross-provider SQLite ledger. Do not start Phase 3 until the owner explicitly approves it.
@@ -597,10 +598,10 @@ App-controlled warm-up for **KumoMTA** (primary) with optional per-method caps: 
 
 ### Acceptance criteria
 
-- [ ] Warm-up controllable from dashboard
-- [ ] Auto actions always store human-readable reasons
-- [ ] Volume never auto-increases while metrics deteriorate
-- [ ] Existing methods remain usable with warm-up disabled
+- [x] Warm-up controllable from dashboard
+- [x] Auto actions always store human-readable reasons
+- [x] Volume never auto-increases while metrics deteriorate
+- [x] Existing methods remain usable with warm-up disabled
 
 ### Risks / rollback
 
@@ -628,12 +629,12 @@ Extend the existing dashboard (Setup / Recipients / Compose / Analytics) without
 9. Bounce / suppression management  
 10. VPS/MTA performance (from Kumo metrics if exposed; otherwise local throughput)
 
-**Time ranges:** hourly / daily / weekly / monthly from `message_events` (+ SendGrid daily stats where applicable).
+**Time ranges:** SendGrid daily stats + Kumo warm-up day series (+ queue lane snapshots). No `message_events` (Phase 2 skipped).
 
 ### Exact implementation steps
 
-1. Add nav entries / `nav-page` sections in `index.php` (or split includes if file size becomes unmanageable — optional refactor, not required).
-2. Wire fetch APIs from Phases 2–4.
+1. Add overview sections on Analytics `nav-page` in `index.php` (Warm-up remains its own page).
+2. Wire `analytics_overview_api.php` aggregating Phases 1/3/4 stores + SendGrid cache + provider logs.
 3. Keep SendGrid sync card operational.
 4. Explicit UI copy: “Accepted ≠ Delivered”.
 
@@ -655,9 +656,9 @@ Extend the existing dashboard (Setup / Recipients / Compose / Analytics) without
 
 ### Acceptance criteria
 
-- [ ] All listed sections reachable
-- [ ] Status vocabulary consistent
-- [ ] Method comparison does not equate SOCKS “OK” with SendGrid “delivered”
+- [x] All listed sections reachable
+- [x] Status vocabulary consistent
+- [x] Method comparison does not equate SOCKS “OK” with SendGrid “delivered”
 
 ### Risks / rollback
 
@@ -672,26 +673,47 @@ Extend the existing dashboard (Setup / Recipients / Compose / Analytics) without
 
 Validate reliability of the three-method stack and increase Kumo volume only when metrics and warm-up approvals support it, toward 20–25k legitimate emails/day.
 
+### Owner modifications (2026-11-10) — binding
+
+1. **SQLite optimization EXCLUDED** — do not add/modify indexes, schemas, concurrency, locking, or journaling. Final DB technology undecided.  
+2. **Brevo data files** — owner authorized deletion of remaining Brevo-specific data (completed; see Phase 6 execution notes).  
+3. **SendGridMail (Portugal)** — new page/API for SendGrid `api`+`pt` recipients (Pending / Sent OK / Unique); country from queue metadata, not `.pt` domains.  
+4. No uncontrolled 20–25k real sends without explicit approval.  
+5. Still no Phase 2 unified `message_events` DB; no new DB technology; no Brevo reintroduction.
+
 ### Steps
 
 1. Define baseline caps (e.g. start far below target).  
 2. Run controlled campaigns to permissioned lists.  
 3. Monitor accept/defer/bounce/complaint/provider splits.  
 4. Optional: inbox placement tests via external seed service (not built as fake engagement).  
-5. Tune PHP workers, Kumo concurrency, SQLite retention, log rotation.  
-6. Document VPS capacity findings (CPU/RAM/disk/network) — **requires owner SSH metrics**; not assumed.
+5. Tune PHP workers / Kumo concurrency / log rotation — **without** SQLite schema or concurrency experiments.  
+6. Document VPS capacity findings (CPU/RAM/disk/network) — **requires owner SSH metrics**; not assumed.  
+7. Ship SendGridMail Portugal UI + API + offline tests.  
+8. Publish `docs/PERFORMANCE_SCALING.md` (simulated vs real; capacity template).
+
+### Delivered in this pass
+
+| Item | Result |
+|------|--------|
+| Brevo data cleanup | Deleted confirmed Brevo sqlite/config/exports/tmp artifacts (listed in execution report) |
+| SendGridMail | Multi-country delivered export: `sendgrid_mail_lib.php` + `sendgrid_mail_api.php` (+ PT shim), consent-safe eligibility, TXT export, offline tests |
+| Perf / scaling | `docs/PERFORMANCE_SCALING.md` — profiling notes, controlled ladder, VPS checklist (metrics unavailable locally) |
+| SQLite opts | **Not done (excluded)** |
+| Mass send / 20–25k live | **Not done (requires further explicit approval)** |
 
 ### Tests / acceptance
 
-- Sustained send day at approved cap without data corruption  
-- Emergency stop works under load  
-- Event DB growth within retention policy  
-- Regression: SendGrid + SOCKS still healthy  
+- Offline SendGridMail + prior phase offline suites  
+- Sustained send day at approved cap without data corruption — **owner-gated live**  
+- Emergency stop works under load — verify during controlled trials  
+- Regression: SendGrid + SOCKS + Kumo + warm-up + analytics still healthy  
 
 ### Risks
 
 - IP/domain reputation damage from premature scale → hard governor  
-- SQLite lock contention → batch writes / WAL already used elsewhere  
+- Missing local `validmails.txt` / `mailssenddone.txt` → cannot verify owner reference 13,397 / 201 / 13,598 until lists are present  
+- VPS capacity unknown without SSH metrics  
 
 ---
 
@@ -746,7 +768,7 @@ All `data/brevo_*` and likely Brevo-era `data/exports/*`, `data/tmp/live_*` list
 
 | # | Item | Blocks |
 |---|------|--------|
-| 1 | Owner approval list for deleting vs archiving Brevo SQLite/exports/tmp | Phase 0 data deletion |
+| 1 | Owner approval list for deleting vs archiving Brevo SQLite/exports/tmp | **Resolved 2026-11-10** — Brevo data files deleted under Phase 6 approval |
 | 2 | KumoMTA SMTP username/password (and whether auth is PLAIN/LOGIN) | Phase 1 live send |
 | 3 | Confirm submission port **587 STARTTLS** vs **465 SMTPS** | Phase 1 config defaults |
 | 4 | App runtime location (local XAMPP Windows vs same VPS) | Firewall/TLS/diag |
