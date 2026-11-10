@@ -30,7 +30,7 @@ $stopFlag = is_file($dir.DIRECTORY_SEPARATOR.'stop_send.flag');
 
 require_once $dir.DIRECTORY_SEPARATOR.'queue_country.php';
 $laneFile = $dir.DIRECTORY_SEPARATOR.'send_queue_lane.txt';
-$lane = (is_file($laneFile) && trim((string)@file_get_contents($laneFile)) === 'smtp') ? 'smtp' : 'api';
+$lane = queue_lane_normalize(is_file($laneFile) ? (string)@file_get_contents($laneFile) : 'api');
 $countryFile = $dir.DIRECTORY_SEPARATOR.'send_country.txt';
 $country = queue_country_code(is_file($countryFile) ? (string)@file_get_contents($countryFile) : 'pt');
 $names = queue_country_files($lane, $country);

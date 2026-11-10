@@ -101,7 +101,7 @@ function mq_progress_snapshot($list, $donePath, $progPath, $phase, $validName, $
 	);
 }
 
-$lane = (isset($_POST['lane']) && $_POST['lane'] === 'smtp') ? 'smtp' : 'api';
+$lane = queue_lane_normalize(isset($_POST['lane']) ? $_POST['lane'] : 'api');
 $country = queue_country_code(isset($_POST['country']) ? $_POST['country'] : 'pt');
 $names = queue_country_files($lane, $country);
 $validPath = __DIR__.DIRECTORY_SEPARATOR.$names['valid'];
@@ -109,7 +109,10 @@ $donePath = __DIR__.DIRECTORY_SEPARATOR.$names['done'];
 $progPath = __DIR__.DIRECTORY_SEPARATOR.$names['prog'];
 $validName = $names['valid'];
 $doneName = $names['done'];
-$listLabel = ($lane === 'smtp' ? 'Normal SMTP list' : 'Brevo campaign list').' · '.strtoupper($country);
+if($lane === 'smtp') $listLabel = 'Normal SMTP list';
+else if($lane === 'kumomta') $listLabel = 'KumoMTA / VPS list';
+else $listLabel = 'SendGrid / API campaign list';
+$listLabel .= ' · '.strtoupper($country);
 
 $action = isset($_POST['action']) ? trim($_POST['action']) : 'save_valid';
 

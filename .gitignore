@@ -44,6 +44,12 @@
 /data/sendgrid.log
 /data/sendgrid_analytics.sqlite
 /data/sendgrid_analytics.sqlite-*
+/data/kumomta.log
+/data/sender_profiles.json
+/data/suppressions.sqlite
+/data/suppressions.sqlite-*
+/exclude_*.txt
+
 /data/brevo_analytics.sqlite
 /data/brevo_analytics.sqlite-*
 /data/brevo_analytics_config.json

@@ -1,18 +1,12 @@
-# Brevo → Twilio SendGrid Migration
+# Twilio SendGrid Migration
 
-AYB Mailer cloud email delivery now uses **Twilio SendGrid Web API v3** only (`POST https://api.sendgrid.com/v3/mail/send`, Bearer API key). Brevo API/SMTP send paths are disabled. Normal PHPMailer SMTP (non-Brevo) remains available as **Normal + SOCKS**.
+AYB Mailer cloud email delivery uses **Twilio SendGrid Web API v3** only (`POST https://api.sendgrid.com/v3/mail/send`, Bearer API key). Normal PHPMailer SMTP remains available as **Normal + SOCKS**.
 
-## What was removed (Brevo send path)
+## Legacy provider removal
 
-- Active **Brevo API** send mode (`brevo_api`) — mapped to / replaced by **SendGrid**.
-- Active **Brevo SMTP** mode (`brevo` / `smtp-relay.brevo.com`) — POST is rejected with a clear error.
-- `brevo_api_send_email()` — stubbed; does not call `api.brevo.com`.
-- UI radio for Brevo SMTP / multi-key Brevo account picker for sending (hidden/disabled).
-- Requirement to paste Brevo `xkeysib-` keys into the browser for sending.
+Former Brevo API/SMTP send paths, Brevo analytics endpoints, and Brevo UI have been removed from the application (Phase 0). Historical Brevo SQLite files under `data/` may still exist on disk for archival purposes and are **not** used by the live app.
 
-**Not removed (historical / analytics only):** `brevo_*.php` recipient analytics, SQLite exports, and stats helpers. They do **not** send mail. Live sending does not use them.
-
-## What was added (SendGrid)
+## What is active (SendGrid)
 
 | File | Role |
 |------|------|
@@ -104,7 +98,7 @@ Do not run without both env vars and `--confirm` / `confirm=1`.
 
 ## Database
 
-SendGrid analytics uses a **new local SQLite file** (`data/sendgrid_analytics.sqlite`) with additive schema only. Historical Brevo SQLite data is not modified. There is still **no MySQL** in this project.
+SendGrid analytics uses a **local SQLite file** (`data/sendgrid_analytics.sqlite`) with additive schema only. There is still **no MySQL** in this project.
 
 ## Troubleshooting
 
@@ -113,7 +107,7 @@ SendGrid analytics uses a **new local SQLite file** (`data/sendgrid_analytics.sq
 | configuration_error / missing key | Empty `SENDGRID_API_KEY` in `.env` |
 | HTTP 401 | Wrong/revoked API key |
 | HTTP 403 | Sender not verified / insufficient key scopes |
-| HTTP 400 | Invalid payload (bad address/content) |
+| HTTP 400 | Request payload (bad address/content) |
 | HTTP 429 | Rate limit — back off |
 | HTTP 5xx | SendGrid outage — retry later manually |
 | Email Activity empty / capped | ~30-day retention; max 1000 rows/query |

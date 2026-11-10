@@ -2,7 +2,7 @@
 
 OmniDigitalSuite Mailer retrieves delivery statistics and related data **exclusively via SendGrid REST APIs**, then stores results in a **local SQLite** file. There is **no Event Webhook**, no public URL, no ngrok/tunnel.
 
-> Note: This project does **not** use MySQL. Analytics storage is `data/sendgrid_analytics.sqlite` (same local-first pattern as the older Brevo SQLite analytics DB, which is left untouched).
+> Note: This project does **not** use MySQL. Analytics storage is `data/sendgrid_analytics.sqlite`.
 
 ## Removed webhook components
 

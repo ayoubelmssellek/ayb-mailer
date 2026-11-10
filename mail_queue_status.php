@@ -25,7 +25,7 @@ function mq_load($path, &$stats = null)
 	return $out;
 }
 
-$lane = (isset($_GET['lane']) && $_GET['lane'] === 'smtp') ? 'smtp' : 'api';
+$lane = queue_lane_normalize(isset($_GET['lane']) ? $_GET['lane'] : 'api');
 $country = queue_country_code(isset($_GET['country']) ? $_GET['country'] : 'pt');
 $names = queue_country_files($lane, $country);
 $validPath = __DIR__.DIRECTORY_SEPARATOR.$names['valid'];

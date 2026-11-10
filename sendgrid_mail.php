@@ -118,6 +118,19 @@ function sendEmail($recipient, $subject, $htmlContent = null, $textContent = nul
 		$out['err'] = 'Invalid recipient email';
 		return $out;
 	}
+	$suppLib = __DIR__.DIRECTORY_SEPARATOR.'suppression_lib.php';
+	if (is_file($suppLib)) {
+		require_once $suppLib;
+		if (function_exists('suppression_blocked_send_result')) {
+			$blocked = suppression_blocked_send_result($to, array('lane' => 'api'));
+			if (is_array($blocked)) {
+				$out['status'] = 'excluded';
+				$out['err'] = isset($blocked['err']) ? $blocked['err'] : 'Suppressed';
+				sendgrid_log('warn', 'excluded', array('to' => $to, 'reason' => isset($blocked['reason']) ? $blocked['reason'] : ''));
+				return $out;
+			}
+		}
+	}
 	if ($subject === '') {
 		$out['status'] = 'failed';
 		$out['err'] = 'Subject is required';

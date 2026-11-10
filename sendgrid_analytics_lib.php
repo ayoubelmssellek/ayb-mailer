@@ -532,6 +532,16 @@ function sg_sync_all($startDate, $endDate)
 	$result['asm_groups'] = sg_sync_asm_groups();
 	$result['credits'] = sg_sync_credits();
 
+	// Additive import into global suppression list (Phase 3) — does not alter SendGrid SQLite rows
+	$result['global_suppression_import'] = array('ok' => false, 'imported' => 0, 'skipped' => 0, 'err' => 'not run');
+	$suppLib = __DIR__.DIRECTORY_SEPARATOR.'suppression_lib.php';
+	if (is_file($suppLib)) {
+		require_once $suppLib;
+		if (function_exists('suppression_import_sendgrid_local')) {
+			$result['global_suppression_import'] = suppression_import_sendgrid_local();
+		}
+	}
+
 	$statsN = isset($result['stats']['upserted']) ? intval($result['stats']['upserted']) : 0;
 	$msgN = isset($result['messages']['upserted']) ? intval($result['messages']['upserted']) : 0;
 	$supN = 0;
