@@ -31,6 +31,8 @@ putenv('WARMUP_DEFAULT_DAILY_CAP=3');
 $_ENV['WARMUP_DEFAULT_DAILY_CAP'] = '3';
 putenv('WARMUP_DEFAULT_HOURLY_CAP=10');
 $_ENV['WARMUP_DEFAULT_HOURLY_CAP'] = '10';
+putenv('WARMUP_MIN_INTERVAL_SECONDS=0');
+$_ENV['WARMUP_MIN_INTERVAL_SECONDS'] = '0';
 putenv('WARMUP_METRIC_MIN_SAMPLE=5');
 $_ENV['WARMUP_METRIC_MIN_SAMPLE'] = '5';
 putenv('WARMUP_MAX_HARD_BOUNCE_RATE=0.2');
@@ -44,9 +46,14 @@ $_ENV['WARMUP_MAX_FAIL_RATE'] = '0.5';
 
 $plan = warmup_get_plan('kumomta');
 t_assert(!empty($plan['id']) && intval($plan['current_daily_cap']) === 3, 'default plan daily cap 3');
+t_assert(isset($plan['state']) && $plan['state'] === 'paused', 'new/boot plan starts paused');
+$pausedBlock = warmup_allow_send('kumomta', 'paused@example.com');
+t_assert(empty($pausedBlock['ok']) && !empty($pausedBlock['halt']), 'paused blocks send');
+warmup_set_state(intval($plan['id']), 'active', 'test activate', 'tester');
 
 $a1 = warmup_allow_send('kumomta', 'a@example.com');
 t_assert(!empty($a1['ok']), 'allow when under cap');
+t_assert(!empty($a1['reservation_id']), 'allow reserves attempt id');
 
 warmup_record_outcome('kumomta', 'a@example.com', 'accepted');
 warmup_record_outcome('kumomta', 'b@example.com', 'accepted');
@@ -56,6 +63,26 @@ t_assert(empty($a2['ok']) && !empty($a2['halt']), 'daily cap blocks after 3 acce
 t_assert(strpos($a2['err'], 'Daily') !== false, 'daily cap message');
 
 // Increase without approval must not raise cap
+// Rolling 60m attempt cap (independent of calendar-hour accepted counter)
+warmup_db()->exec('DELETE FROM warmup_send_events');
+warmup_apply_caps(intval($plan['id']), 50, 2, 'test rolling hourly 2', 'tester');
+warmup_set_state(intval($plan['id']), 'active', 'rolling test', 'tester');
+$r1 = warmup_allow_send('kumomta', 'roll1@example.com');
+$r2 = warmup_allow_send('kumomta', 'roll2@example.com');
+$r3 = warmup_allow_send('kumomta', 'roll3@example.com');
+t_assert(!empty($r1['ok']) && !empty($r2['ok']), 'rolling window allows first 2 attempts');
+t_assert(empty($r3['ok']) && strpos($r3['err'], 'Rolling 60-minute') !== false, '3rd attempt blocked by rolling 20/hr-style cap');
+
+// Pacing gate
+putenv('WARMUP_MIN_INTERVAL_SECONDS=180');
+$_ENV['WARMUP_MIN_INTERVAL_SECONDS'] = '180';
+warmup_apply_caps(intval($plan['id']), 50, 20, 'restore hourly for pace', 'tester');
+$pacer = warmup_allow_send('kumomta', 'pace@example.com');
+t_assert(empty($pacer['ok']) && !empty($pacer['pace_wait']) && intval($pacer['retry_after']) > 0, 'pacing wait when min interval 180s');
+putenv('WARMUP_MIN_INTERVAL_SECONDS=0');
+$_ENV['WARMUP_MIN_INTERVAL_SECONDS'] = '0';
+warmup_apply_caps(intval($plan['id']), 3, 10, 'restore daily 3 for remaining tests', 'tester');
+
 $req = warmup_request_increase('kumomta', 100, 20, 'want more', 'tester');
 t_assert(!empty($req['ok']) && !empty($req['pending']) && empty($req['applied']), 'increase creates pending');
 $plan2 = warmup_get_plan('kumomta');

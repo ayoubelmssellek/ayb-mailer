@@ -17,6 +17,9 @@ function warmup_config()
 		'enabled' => ayb_env_bool('WARMUP_ENABLED', true),
 		'default_daily' => max(1, intval(ayb_env('WARMUP_DEFAULT_DAILY_CAP', '50'))),
 		'default_hourly' => max(1, intval(ayb_env('WARMUP_DEFAULT_HOURLY_CAP', '20'))),
+		// ~1 email / 3 minutes for 20/hour pacing (server-side, not JS-only)
+		'min_interval_seconds' => max(0, intval(ayb_env('WARMUP_MIN_INTERVAL_SECONDS', '180'))),
+		'default_state' => 'paused',
 		'min_sample' => max(5, intval(ayb_env('WARMUP_METRIC_MIN_SAMPLE', '20'))),
 		'max_hard_bounce_rate' => floatval(ayb_env('WARMUP_MAX_HARD_BOUNCE_RATE', '0.05')),
 		'max_complaint_rate' => floatval(ayb_env('WARMUP_MAX_COMPLAINT_RATE', '0.002')),
@@ -105,6 +108,56 @@ function warmup_db_migrate(PDO $pdo)
 		resolved_at TEXT,
 		resolved_by TEXT NOT NULL DEFAULT ''
 	)");
+	// Append-only attempt ledger for rolling 60-minute caps + pacing + multi-worker safety.
+	$pdo->exec("CREATE TABLE IF NOT EXISTS warmup_send_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		plan_id INTEGER NOT NULL,
+		email TEXT NOT NULL DEFAULT '',
+		event_type TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)");
+	$pdo->exec("CREATE INDEX IF NOT EXISTS idx_warmup_events_plan_time ON warmup_send_events(plan_id, created_at)");
+	$pdo->exec("CREATE INDEX IF NOT EXISTS idx_warmup_events_plan_type ON warmup_send_events(plan_id, event_type, created_at)");
+
+	$pdo->exec("CREATE TABLE IF NOT EXISTS warmup_meta (
+		meta_key TEXT PRIMARY KEY,
+		meta_value TEXT NOT NULL DEFAULT ''
+	)");
+}
+
+function warmup_meta_get($key, $default = '')
+{
+	$st = warmup_db()->prepare('SELECT meta_value FROM warmup_meta WHERE meta_key=?');
+	$st->execute(array((string)$key));
+	$v = $st->fetchColumn();
+	return ($v === false || $v === null) ? $default : (string)$v;
+}
+
+function warmup_meta_set($key, $value)
+{
+	warmup_db()->prepare('INSERT OR REPLACE INTO warmup_meta(meta_key, meta_value) VALUES(?,?)')
+		->execute(array((string)$key, (string)$value));
+}
+
+/**
+ * Ensure 20/hr controller defaults: paused until Dashboard Resume; hourly cap 20.
+ */
+function warmup_bootstrap_v20hr()
+{
+	if (warmup_meta_get('paused_boot_v20hr', '') === '1') return;
+	$cfg = warmup_config();
+	$pdo = warmup_db();
+	$hourly = intval($cfg['default_hourly']);
+	$pdo->prepare("UPDATE warmup_plans SET state='paused', hourly_cap=?, updated_at=datetime('now') WHERE method='kumomta'")
+		->execute(array($hourly));
+	$row = $pdo->query("SELECT id FROM warmup_plans WHERE method='kumomta'")->fetch(PDO::FETCH_ASSOC);
+	if ($row) {
+		warmup_decision(intval($row['id']), 'state_paused', 'Boot: warm-up PAUSED for 20 emails/hour controller (Resume from Dashboard to start)', 'system', array(
+			'hourly_cap' => $hourly,
+			'min_interval_seconds' => intval($cfg['min_interval_seconds'])
+		));
+	}
+	warmup_meta_set('paused_boot_v20hr', '1');
 }
 
 function warmup_today()
@@ -149,6 +202,7 @@ function warmup_ensure_plan($method = 'kumomta')
 	if ($method === '') $method = 'kumomta';
 	$cfg = warmup_config();
 	$pdo = warmup_db();
+	warmup_bootstrap_v20hr();
 	$st = $pdo->prepare('SELECT * FROM warmup_plans WHERE method = ?');
 	$st->execute(array($method));
 	$row = $st->fetch(PDO::FETCH_ASSOC);
@@ -162,12 +216,12 @@ function warmup_ensure_plan($method = 'kumomta')
 		$cfg['default_daily'],
 		$cfg['default_hourly'],
 		'{}',
-		'active',
+		'paused',
 		1,
-		'Auto-created KumoMTA warm-up plan'
+		'Auto-created KumoMTA warm-up plan (starts paused)'
 	));
 	$id = intval($pdo->lastInsertId());
-	warmup_decision($id, 'create', 'Created default warm-up plan (daily '.$cfg['default_daily'].', hourly '.$cfg['default_hourly'].')', 'system');
+	warmup_decision($id, 'create', 'Created warm-up plan paused (daily '.$cfg['default_daily'].', hourly '.$cfg['default_hourly'].', pace '.$cfg['min_interval_seconds'].'s)', 'system');
 	$st->execute(array($method));
 	return $st->fetch(PDO::FETCH_ASSOC);
 }
@@ -278,9 +332,58 @@ function warmup_evaluate_metrics($plan, $applyCooldown = false)
 	return array('ok' => true, 'reason' => 'metrics healthy');
 }
 
+function warmup_rolling_attempt_count($planId, $windowSeconds = 3600)
+{
+	$planId = intval($planId);
+	$windowSeconds = max(60, intval($windowSeconds));
+	$st = warmup_db()->prepare("SELECT COUNT(*) FROM warmup_send_events
+		WHERE plan_id=? AND event_type='attempt'
+		AND created_at >= datetime('now', ?)");
+	$st->execute(array($planId, '-'.$windowSeconds.' seconds'));
+	return intval($st->fetchColumn());
+}
+
+function warmup_last_attempt_at($planId)
+{
+	$st = warmup_db()->prepare("SELECT created_at FROM warmup_send_events
+		WHERE plan_id=? AND event_type='attempt' ORDER BY id DESC LIMIT 1");
+	$st->execute(array(intval($planId)));
+	$v = $st->fetchColumn();
+	return $v === false ? '' : (string)$v;
+}
+
+function warmup_next_send_at($planId, $minIntervalSeconds)
+{
+	$minIntervalSeconds = max(0, intval($minIntervalSeconds));
+	$last = warmup_last_attempt_at($planId);
+	if ($last === '' || $minIntervalSeconds < 1) {
+		return gmdate('c');
+	}
+	$ts = strtotime($last.' UTC');
+	if ($ts === false) $ts = time();
+	$next = $ts + $minIntervalSeconds;
+	if ($next < time()) $next = time();
+	return gmdate('c', $next);
+}
+
+function warmup_retry_after_seconds($planId, $minIntervalSeconds)
+{
+	$minIntervalSeconds = max(0, intval($minIntervalSeconds));
+	if ($minIntervalSeconds < 1) return 0;
+	$last = warmup_last_attempt_at($planId);
+	if ($last === '') return 0;
+	$ts = strtotime($last.' UTC');
+	if ($ts === false) return 0;
+	$left = ($ts + $minIntervalSeconds) - time();
+	return $left > 0 ? $left : 0;
+}
+
 /**
- * Pre-send governor.
- * @return array{ok:bool,halt:bool,wait:bool,err:string,reason:string,remaining:array}
+ * Pre-send governor (server-side).
+ * Uses SQLite BEGIN IMMEDIATE so parallel workers cannot bypass rolling/hourly/pacing limits.
+ * Hourly = rolling 60-minute attempt window (not calendar hour only).
+ *
+ * @return array{ok:bool,halt:bool,wait:bool,err:string,reason:string,remaining:array,retry_after?:int,reservation_id?:int}
  */
 function warmup_allow_send($method = 'kumomta', $email = '', array $opts = array())
 {
@@ -291,7 +394,10 @@ function warmup_allow_send($method = 'kumomta', $email = '', array $opts = array
 		'wait' => false,
 		'err' => '',
 		'reason' => '',
-		'remaining' => array()
+		'remaining' => array(),
+		'retry_after' => 0,
+		'next_send_at' => '',
+		'reservation_id' => 0
 	);
 	if (empty($cfg['enabled']) || !empty($opts['skip'])) {
 		$out['reason'] = 'warm-up disabled or skipped';
@@ -312,7 +418,7 @@ function warmup_allow_send($method = 'kumomta', $email = '', array $opts = array
 		return $out;
 	}
 
-	$state = isset($plan['state']) ? $plan['state'] : 'active';
+	$state = isset($plan['state']) ? $plan['state'] : 'paused';
 	if (in_array($state, array('paused', 'hold', 'stopped', 'cooldown'), true)) {
 		$out['ok'] = false;
 		$out['halt'] = true;
@@ -331,30 +437,64 @@ function warmup_allow_send($method = 'kumomta', $email = '', array $opts = array
 	}
 
 	$planId = intval($plan['id']);
-	$day = warmup_day_counts($planId);
 	$dailyCap = max(0, intval($plan['current_daily_cap']));
 	$hourlyCap = max(0, intval($plan['hourly_cap']));
-	$acceptedToday = intval($day['accepted']);
-	$acceptedHour = warmup_hour_accepted($planId);
-	$dailyLeft = max(0, $dailyCap - $acceptedToday);
-	$hourlyLeft = max(0, $hourlyCap - $acceptedHour);
-
+	$minInterval = intval($cfg['min_interval_seconds']);
 	$provider = warmup_provider_from_email($email);
 	$pcaps = warmup_provider_caps_map($plan);
 	$providerCap = isset($pcaps[$provider]) ? intval($pcaps[$provider]) : null;
+
+	$pdo = warmup_db();
+	$locked = false;
+	$unlock = function ($commit) use ($pdo, &$locked) {
+		if (!$locked) return;
+		try {
+			$pdo->exec($commit ? 'COMMIT' : 'ROLLBACK');
+		} catch (Exception $e) {
+			try { $pdo->exec('ROLLBACK'); } catch (Exception $e2) {}
+		}
+		$locked = false;
+	};
+	try {
+		$pdo->exec('BEGIN IMMEDIATE');
+		$locked = true;
+	} catch (Exception $e) {
+		$out['ok'] = false;
+		$out['halt'] = true;
+		$out['err'] = 'Warm-up lock busy: '.$e->getMessage();
+		$out['reason'] = $out['err'];
+		return $out;
+	}
+	// Touch plan row under write lock so parallel PHP workers serialize.
+	$pdo->exec('UPDATE warmup_plans SET updated_at=updated_at WHERE id='.$planId);
+
+	$day = warmup_day_counts($planId);
+	$acceptedToday = intval($day['accepted']);
+	$rollingAttempts = warmup_rolling_attempt_count($planId, 3600);
+	$calendarHourAccepted = warmup_hour_accepted($planId);
+	$dailyLeft = max(0, $dailyCap - $acceptedToday);
+	$hourlyLeft = max(0, $hourlyCap - $rollingAttempts);
 	$providerUsed = warmup_provider_accepted_today($planId, $provider);
 	$providerLeft = ($providerCap === null) ? null : max(0, $providerCap - $providerUsed);
+	$retryAfter = warmup_retry_after_seconds($planId, $minInterval);
+	$nextAt = warmup_next_send_at($planId, $minInterval);
 
 	$out['remaining'] = array(
 		'daily' => $dailyLeft,
 		'hourly' => $hourlyLeft,
+		'rolling_attempts_60m' => $rollingAttempts,
+		'calendar_hour_accepted' => $calendarHourAccepted,
 		'provider' => $provider,
 		'provider_left' => $providerLeft,
 		'daily_cap' => $dailyCap,
-		'hourly_cap' => $hourlyCap
+		'hourly_cap' => $hourlyCap,
+		'min_interval_seconds' => $minInterval
 	);
+	$out['retry_after'] = $retryAfter;
+	$out['next_send_at'] = $nextAt;
 
 	if ($dailyLeft < 1) {
+		$unlock(false);
 		$out['ok'] = false;
 		$out['wait'] = true;
 		$out['halt'] = true;
@@ -363,25 +503,46 @@ function warmup_allow_send($method = 'kumomta', $email = '', array $opts = array
 		return $out;
 	}
 	if ($hourlyLeft < 1) {
+		$unlock(false);
 		$out['ok'] = false;
 		$out['wait'] = true;
 		$out['halt'] = true;
-		$out['err'] = 'Hourly warm-up cap reached ('.$acceptedHour.'/'.$hourlyCap.')';
+		$out['err'] = 'Rolling 60-minute attempt cap reached ('.$rollingAttempts.'/'.$hourlyCap.')';
+		$out['reason'] = $out['err'];
+		return $out;
+	}
+	if ($retryAfter > 0) {
+		$unlock(false);
+		$out['ok'] = false;
+		$out['wait'] = true;
+		$out['halt'] = false; // campaign may sleep then retry
+		$out['pace_wait'] = true;
+		$out['err'] = 'Warm-up pacing: wait '.$retryAfter.'s (min interval '.$minInterval.'s ≈ 1 / 3 min)';
 		$out['reason'] = $out['err'];
 		return $out;
 	}
 	if ($providerLeft !== null && $providerLeft < 1) {
+		$unlock(false);
 		$out['ok'] = false;
 		$out['wait'] = true;
 		$out['err'] = 'Provider cap reached for '.$provider.' ('.$providerUsed.'/'.$providerCap.')';
 		$out['reason'] = $out['err'];
-		// provider wait: skip this recipient but do not halt whole campaign
 		$out['halt'] = false;
 		$out['skip_recipient'] = true;
 		return $out;
 	}
 
+	$emailNorm = strtolower(trim((string)$email));
+	$ins = $pdo->prepare("INSERT INTO warmup_send_events(plan_id, email, event_type, created_at) VALUES(?,?, 'attempt', datetime('now'))");
+	$ins->execute(array($planId, $emailNorm));
+	$resId = intval($pdo->lastInsertId());
+	$unlock(true);
+
+	$out['reservation_id'] = $resId;
 	$out['reason'] = 'allowed';
+	$out['remaining']['rolling_attempts_60m'] = $rollingAttempts + 1;
+	$out['remaining']['hourly'] = max(0, $hourlyCap - ($rollingAttempts + 1));
+	$out['next_send_at'] = warmup_next_send_at($planId, $minInterval);
 	return $out;
 }
 
@@ -413,23 +574,40 @@ function warmup_record_outcome($method, $email, $status, array $extra = array())
 	$planId = intval($plan['id']);
 	warmup_bump($planId, 'attempted', $email);
 	$status = strtolower((string)$status);
+	$eventType = 'failed';
 	if ($status === 'accepted' || $status === 'ok') {
 		warmup_bump($planId, 'accepted', $email);
+		$eventType = 'accepted';
 	} else if ($status === 'excluded') {
 		warmup_bump($planId, 'excluded', $email);
+		$eventType = 'excluded';
 	} else if ($status === 'soft_bounce') {
 		warmup_bump($planId, 'failed', $email);
 		warmup_bump($planId, 'soft_bounce', $email);
+		$eventType = 'soft_bounce';
 	} else if ($status === 'hard_bounce') {
 		warmup_bump($planId, 'failed', $email);
 		warmup_bump($planId, 'hard_bounce', $email);
+		$eventType = 'hard_bounce';
 	} else if ($status === 'complaint') {
 		warmup_bump($planId, 'complaint', $email);
+		$eventType = 'complaint';
 	} else {
 		warmup_bump($planId, 'failed', $email);
 		$code = isset($extra['smtp_code']) ? intval($extra['smtp_code']) : 0;
-		if ($code >= 500) warmup_bump($planId, 'hard_bounce', $email);
-		else if ($code >= 400) warmup_bump($planId, 'soft_bounce', $email);
+		if ($code >= 500) {
+			warmup_bump($planId, 'hard_bounce', $email);
+			$eventType = 'hard_bounce';
+		} else if ($code >= 400) {
+			warmup_bump($planId, 'soft_bounce', $email);
+			$eventType = 'soft_bounce';
+		}
+	}
+	try {
+		warmup_db()->prepare("INSERT INTO warmup_send_events(plan_id, email, event_type, created_at) VALUES(?,?,?,datetime('now'))")
+			->execute(array($planId, strtolower(trim((string)$email)), $eventType));
+	} catch (Exception $e) {
+		// ledger is additive; counters already updated
 	}
 }
 
@@ -576,6 +754,12 @@ function warmup_status($method = 'kumomta')
 	$metrics = warmup_evaluate_metrics($plan);
 	// reload plan if cooldown flipped
 	$plan = warmup_get_plan($method);
+	$rolling = warmup_rolling_attempt_count($planId, 3600);
+	$minInterval = intval($cfg['min_interval_seconds']);
+	$hourlyCap = intval($plan['hourly_cap']);
+	$nextSend = warmup_next_send_at($planId, $minInterval);
+	$retryAfter = warmup_retry_after_seconds($planId, $minInterval);
+	$effectiveRate = ($minInterval > 0) ? round(3600 / $minInterval, 2) : null;
 	return array(
 		'ok' => true,
 		'global_enabled' => !empty($cfg['enabled']),
@@ -587,16 +771,43 @@ function warmup_status($method = 'kumomta')
 			'state' => $plan['state'],
 			'start_date' => $plan['start_date'],
 			'current_daily_cap' => intval($plan['current_daily_cap']),
-			'hourly_cap' => intval($plan['hourly_cap']),
+			'hourly_cap' => $hourlyCap,
+			'min_interval_seconds' => $minInterval,
 			'provider_caps' => warmup_provider_caps_map($plan),
 			'require_manual_increase' => !empty($plan['require_manual_increase']),
 			'notes' => $plan['notes']
 		),
 		'today' => $day,
+		'counters' => array(
+			'sent_attempts_today' => intval($day['attempted']),
+			'accepted_today' => intval($day['accepted']),
+			'failed_today' => intval($day['failed']),
+			'bounced_today' => intval($day['hard_bounce']) + intval($day['soft_bounce']),
+			'hard_bounce_today' => intval($day['hard_bounce']),
+			'soft_bounce_today' => intval($day['soft_bounce']),
+			'complaint_today' => intval($day['complaint']),
+			'excluded_today' => intval($day['excluded']),
+			'delivered_note' => 'Inbox delivered is not tracked per-recipient for Kumo without VPS event hooks — Accepted ≠ Delivered'
+		),
 		'hour_accepted' => $hourAcc,
+		'rolling_60m_attempts' => $rolling,
+		'pacing' => array(
+			'min_interval_seconds' => $minInterval,
+			'target_per_hour' => $effectiveRate,
+			'retry_after_seconds' => $retryAfter,
+			'next_send_at' => $nextSend
+		),
 		'remaining' => array(
 			'daily' => max(0, intval($plan['current_daily_cap']) - intval($day['accepted'])),
-			'hourly' => max(0, intval($plan['hourly_cap']) - $hourAcc)
+			'hourly' => max(0, $hourlyCap - $rolling)
+		),
+		'queue' => array(
+			'lane' => 'kumomta',
+			'note' => 'Use Recipients → KumoMTA list + mail_queue_status for pending/done counts'
+		),
+		'vps_readiness' => array(
+			'ssh_verified' => false,
+			'note' => 'SSH to VPS was unavailable (publickey denied). DNS/TCP checks are separate from container health.'
 		),
 		'providers_today' => $provRows,
 		'pending_increases' => $pendingRows,

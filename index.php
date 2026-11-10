@@ -1211,6 +1211,21 @@ document.addEventListener('DOMContentLoaded', function(){
       wuSet('wu-hourly-left', rem.hourly);
       wuSet('wu-accepted', day.accepted);
       wuSet('wu-state', p.state);
+      var c=d.counters||{};
+      wuSet('wu-sent', c.sent_attempts_today);
+      wuSet('wu-bounced', c.bounced_today);
+      wuSet('wu-failed', c.failed_today);
+      var pace=d.pacing||{};
+      wuSet('wu-rate', pace.target_per_hour!=null?pace.target_per_hour:(p.hourly_cap||20));
+      var paceBox=document.getElementById('wu-pace-box');
+      if(paceBox){
+        paceBox.textContent='Pacing min '+((p.min_interval_seconds!=null)?p.min_interval_seconds:(pace.min_interval_seconds||180))+'s · next_send_at '+(pace.next_send_at||'—')+' · retry_after '+(pace.retry_after_seconds!=null?pace.retry_after_seconds:0)+'s · rolling 60m attempts '+(d.rolling_60m_attempts!=null?d.rolling_60m_attempts:0)+'/'+(p.hourly_cap||20);
+      }
+      var qBox=document.getElementById('wu-queue-box');
+      if(qBox){
+        var q=d.queue||{};
+        qBox.textContent=(q.note||'Queue: open Recipients → KumoMTA')+(d.vps_readiness&&d.vps_readiness.note?(' · '+d.vps_readiness.note):'');
+      }
       var dc=document.getElementById('wu-daily-cap'); if(dc) dc.value=p.current_daily_cap||50;
       var hc=document.getElementById('wu-hourly-cap'); if(hc) hc.value=p.hourly_cap||20;
       var pend=document.getElementById('wu-pending');
@@ -2344,15 +2359,24 @@ document.addEventListener('DOMContentLoaded', function(){
     <h3>KumoMTA warm-up</h3>
     <div class="hint" style="margin:0 0 10px">Governor applies to <b>campaign</b> Kumo sends only (test list skips caps). Caps never auto-increase — pending increases need Approve. Bad metrics → cooldown with a stored reason. See <code>docs/WARMUP.md</code>.</div>
     <div id="warmup-status-box" class="sd-note">Loading warm-up status…</div>
+    <div class="hint" style="margin:0 0 10px"><b>Default:</b> PAUSED · hourly <b>20</b> attempts / rolling 60 min · pace ≈ <b>180s</b> (1 / 3 min). Resume only when ready. Accepted ≠ Delivered.</div>
     <div class="sd-overview" style="grid-template-columns:repeat(4,1fr);margin:12px 0">
       <div class="sd-kpi"><b id="wu-daily-left">—</b><span>Daily left</span></div>
-      <div class="sd-kpi"><b id="wu-hourly-left">—</b><span>Hourly left</span></div>
+      <div class="sd-kpi"><b id="wu-hourly-left">—</b><span>Hourly left (60m)</span></div>
       <div class="sd-kpi"><b id="wu-accepted">—</b><span>Accepted today</span></div>
       <div class="sd-kpi fail"><b id="wu-state">—</b><span>State</span></div>
     </div>
+    <div class="sd-overview" style="grid-template-columns:repeat(4,1fr);margin:0 0 12px">
+      <div class="sd-kpi"><b id="wu-sent">—</b><span>Attempts today</span></div>
+      <div class="sd-kpi fail"><b id="wu-bounced">—</b><span>Bounced today</span></div>
+      <div class="sd-kpi fail"><b id="wu-failed">—</b><span>Failed today</span></div>
+      <div class="sd-kpi info"><b id="wu-rate">—</b><span>Target / hour</span></div>
+    </div>
+    <div id="wu-pace-box" class="sd-note">Next send / pacing: —</div>
+    <div id="wu-queue-box" class="sd-note" style="margin-top:8px">Queue: —</div>
     <div class="ra-filters" style="flex-wrap:wrap;gap:8px">
       <label>Daily cap <input type="number" id="wu-daily-cap" min="1" style="width:90px"></label>
-      <label>Hourly cap <input type="number" id="wu-hourly-cap" min="1" style="width:90px"></label>
+      <label>Hourly cap <input type="number" id="wu-hourly-cap" min="1" style="width:90px" title="Rolling 60-minute attempt limit"></label>
       <button type="button" class="sd-btn" id="btn-wu-save-caps">Save / request increase</button>
       <button type="button" class="sd-btn" id="btn-wu-refresh">Refresh</button>
     </div>
@@ -10622,6 +10646,16 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 				{
 					dash_log('warn', 'WARM-UP SKIP '.$to.' — '.$wuErr);
 					dash_js('dashFail();');
+					continue;
+				}
+				// Server-side pacing (~3 min): sleep then retry same recipient without dying.
+				if(!empty($wu['pace_wait']) || (!empty($wu['wait']) && empty($wu['halt'])))
+				{
+					$waitSec = isset($wu['retry_after']) ? max(1, intval($wu['retry_after'])) : 180;
+					if($waitSec > 600) $waitSec = 600;
+					dash_log('info', 'WARM-UP PACE wait '.$waitSec.'s — '.$wuErr);
+					sleep($waitSec);
+					$x--; // retry same slot
 					continue;
 				}
 				$left = count($pendingAll) - count($sessionOk);
