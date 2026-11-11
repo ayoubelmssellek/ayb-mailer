@@ -60,7 +60,9 @@ $idx = file_get_contents($root.DIRECTORY_SEPARATOR.'index.php');
 t_assert(strpos($idx, 'analytics-overview-card') !== false, 'index has overview card');
 t_assert(strpos($idx, 'Accepted ≠ Delivered') !== false, 'index states Accepted ≠ Delivered');
 t_assert(strpos($idx, 'warmup:{title:') !== false, 'PAGE_META includes warmup');
+t_assert(strpos($idx, 'logs:{title:') !== false, 'PAGE_META includes logs');
 t_assert(strpos($idx, 'loadAnalyticsOverview') !== false, 'overview JS wired');
+t_assert(strpos($idx, 'ao-kpi-delivered') !== false, 'analytics KPI delivered present');
 t_assert(strpos($idx, '9. Global suppressions') !== false, 'suppressions numbered as section 9');
 
 @unlink($runner);

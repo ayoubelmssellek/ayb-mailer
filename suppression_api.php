@@ -23,12 +23,23 @@ function supp_api_out(array $payload, $code = 200)
 }
 
 if ($action === 'counts') {
+	$cfg = suppression_config();
+	$meta = function_exists('unsub_client_meta_get') ? unsub_client_meta_get() : array();
 	supp_api_out(array('ok' => true, 'counts' => suppression_counts(), 'config' => array(
-		'enabled' => !empty(suppression_config()['enabled']),
-		'soft_max' => suppression_config()['soft_max'],
-		'soft_days' => suppression_config()['soft_days'],
-		'has_unsub_base' => suppression_config()['unsub_base_url'] !== ''
+		'enabled' => !empty($cfg['enabled']),
+		'soft_max' => $cfg['soft_max'],
+		'soft_days' => $cfg['soft_days'],
+		'has_unsub_base' => $cfg['unsub_base_url'] !== '',
+		'service_enabled' => !empty($cfg['service_enabled']),
+		'service_ready' => function_exists('unsub_client_ready') ? unsub_client_ready() : false,
+		'cache_age_seconds' => function_exists('unsub_client_cache_age_seconds') ? unsub_client_cache_age_seconds() : null,
+		'last_pull_ok_at' => isset($meta['last_pull_ok_at']) ? $meta['last_pull_ok_at'] : 0
 	)));
+}
+
+if ($action === 'sync_pull') {
+	$r = function_exists('suppression_sync_from_service') ? suppression_sync_from_service() : array('ok' => false, 'err' => 'unavailable');
+	supp_api_out($r);
 }
 
 if ($action === 'list') {

@@ -1,0 +1,32 @@
+AYB Unsubscribe — Hostinger migration notes
+===========================================
+
+Document Root (unchanged):
+  .../public_html/mail
+
+ZIP contents extract INTO that Document Root (flat). You should see:
+  mail/index.php
+  mail/.htaccess
+  mail/config.php
+  mail/src/
+  mail/public/index.php
+NOT: mail/mail/...
+
+IMPORTANT — preserve credentials:
+  If Hostinger already has a working config.php with DB/API keys,
+  do NOT overwrite it with the ZIP placeholder.
+  Steps:
+    1) Backup entire mail/ folder first.
+    2) Move existing nested files up if needed (see chat migration plan).
+    3) Extract ZIP, but skip/overwrite carefully:
+       - Keep YOUR config.php (with real db_* and api keys).
+       - Replace index.php, .htaccess, src/, public/ from ZIP.
+
+After extract, verify:
+  https://mail.omnidigitalsuite.com/           -> ayb-unsub
+  https://mail.omnidigitalsuite.com/api/v1/health
+  https://mail.omnidigitalsuite.com/u/invalidtoken
+  https://mail.omnidigitalsuite.com/config.php -> 403
+  https://mail.omnidigitalsuite.com/src/bootstrap.php -> 403
+
+Then fill Desktop .env keys and set UNSUB_SERVICE_ENABLED=true.

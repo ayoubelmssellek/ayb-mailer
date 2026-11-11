@@ -1,0 +1,35 @@
+# AYB Unsubscribe — root .htaccess (Document Root = mail/)
+# Apache 2.4 / LiteSpeed compatible
+Options -Indexes
+
+<IfModule mod_authz_core.c>
+  <Files "config.php">
+    Require all denied
+  </Files>
+  <Files "config.example.php">
+    Require all denied
+  </Files>
+  <FilesMatch "(?i)^(?:README\.md|mail\.zip)$">
+    Require all denied
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Deny sensitive paths FIRST
+  RewriteRule (^|/)\. - [F,L]
+  RewriteRule ^config\.php$ - [F,L]
+  RewriteRule ^config\.example\.php$ - [F,L]
+  RewriteRule ^README\.md$ - [F,L]
+  RewriteRule ^MIGRATE_HOSTINGER\.txt$ - [F,L]
+  RewriteRule ^src(?:/|$) - [F,L]
+  RewriteRule ^sql(?:/|$) - [F,L]
+  RewriteRule ^_legacy_bayan(?:/|$) - [F,L]
+  RewriteRule ^mail\.zip$ - [F,L]
+  RewriteRule ^.*\.zip$ - [F,L]
+
+  # Front controller: no external redirect to /public/
+  RewriteRule ^index\.php$ - [L]
+  RewriteRule ^ index.php [L]
+</IfModule>

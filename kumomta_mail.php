@@ -213,6 +213,15 @@ function kumomta_send_email($toEmail, $subject, $htmlOrText, $isHtml = true, arr
 		$out['err'] = 'Invalid recipient email';
 		return $out;
 	}
+	if (function_exists('suppression_sync_allow_marketing') && empty($options['skip_unsub_sync_gate'])) {
+		$syncGate = suppression_sync_allow_marketing();
+		if (empty($syncGate['ok'])) {
+			$out['status'] = 'configuration_error';
+			$out['err'] = isset($syncGate['err']) ? $syncGate['err'] : 'Unsubscribe sync fail-closed';
+			kumomta_log('error', $out['err']);
+			return $out;
+		}
+	}
 	if (function_exists('suppression_blocked_send_result')) {
 		$blocked = suppression_blocked_send_result($to, array('lane' => 'kumomta'));
 		if (is_array($blocked)) {
@@ -256,17 +265,48 @@ function kumomta_send_email($toEmail, $subject, $htmlOrText, $isHtml = true, arr
 		$mail->addAddress($to);
 		$mail->Subject = $subject;
 		$mail->isHTML(!empty($isHtml));
+		$unsubUrl = '';
+		if (empty($options['skip_list_unsubscribe']) && function_exists('suppression_unsub_issue')) {
+			$issued = suppression_unsub_issue($to, array(
+				'provider' => 'kumomta',
+				'issued_by' => isset($options['campaign_id']) ? (string)$options['campaign_id'] : 'kumomta'
+			));
+			if (empty($issued['ok']) && function_exists('unsub_client_ready') && unsub_client_ready()) {
+				$out['status'] = 'configuration_error';
+				$out['err'] = 'Unsubscribe URL issue failed: '.(isset($issued['err']) ? $issued['err'] : 'unknown');
+				kumomta_log('error', $out['err']);
+				return $out;
+			}
+			if (!empty($issued['ok']) && !empty($issued['url'])) {
+				$unsubUrl = $issued['url'];
+				if (!empty($isHtml)) {
+					$safe = htmlspecialchars($unsubUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+					$body .= "\n<p style=\"margin-top:2em;font-size:12px;font-family:Arial,sans-serif;color:#444;\">"
+						.'If you no longer wish to receive these emails, '
+						.'<a href="'.$safe.'">unsubscribe here</a>.</p>';
+				} else {
+					$body .= "\n\n---\nIf you no longer wish to receive these emails, unsubscribe here:\n".$unsubUrl."\n";
+				}
+			}
+		}
 		$mail->Body = $body;
 		if (!empty($isHtml)) {
 			$mail->AltBody = trim(strip_tags($body)) !== '' ? strip_tags($body) : ' ';
 		}
-		if (function_exists('suppression_list_unsubscribe_headers') && empty($options['skip_list_unsubscribe'])) {
-			$hdrs = suppression_list_unsubscribe_headers($to);
-			if (!empty($hdrs['list_unsubscribe']) && method_exists($mail, 'addCustomHeader')) {
-				$mail->addCustomHeader('List-Unsubscribe', $hdrs['list_unsubscribe']);
-				if (!empty($hdrs['list_unsubscribe_post'])) {
-					$mail->addCustomHeader('List-Unsubscribe-Post', $hdrs['list_unsubscribe_post']);
-				}
+		if ($unsubUrl !== '' && method_exists($mail, 'addCustomHeader')) {
+			$cfgM = function_exists('suppression_config') ? suppression_config() : array('mailto_unsub' => '');
+			$parts = array();
+			if (!empty($cfgM['mailto_unsub']) && strpos($cfgM['mailto_unsub'], '@') !== false) {
+				$parts[] = '<mailto:'.$cfgM['mailto_unsub'].'?subject=unsubscribe>';
+			}
+			$parts[] = '<'.$unsubUrl.'>';
+			$mail->addCustomHeader('List-Unsubscribe', implode(', ', $parts));
+			if (stripos($unsubUrl, 'https://') === 0) {
+				$mail->addCustomHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+			} else if (function_exists('unsub_client_ready') && unsub_client_ready()) {
+				$out['status'] = 'configuration_error';
+				$out['err'] = 'Unsubscribe URL must be HTTPS for RFC 8058';
+				return $out;
 			}
 		}
 

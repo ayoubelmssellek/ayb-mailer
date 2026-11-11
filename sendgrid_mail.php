@@ -121,6 +121,15 @@ function sendEmail($recipient, $subject, $htmlContent = null, $textContent = nul
 	$suppLib = __DIR__.DIRECTORY_SEPARATOR.'suppression_lib.php';
 	if (is_file($suppLib)) {
 		require_once $suppLib;
+		if (function_exists('suppression_sync_allow_marketing') && empty($options['skip_unsub_sync_gate'])) {
+			$syncGate = suppression_sync_allow_marketing();
+			if (empty($syncGate['ok'])) {
+				$out['status'] = 'configuration_error';
+				$out['err'] = isset($syncGate['err']) ? $syncGate['err'] : 'Unsubscribe sync fail-closed';
+				sendgrid_log('error', $out['err']);
+				return $out;
+			}
+		}
 		if (function_exists('suppression_blocked_send_result')) {
 			$blocked = suppression_blocked_send_result($to, array('lane' => 'api'));
 			if (is_array($blocked)) {
@@ -143,6 +152,49 @@ function sendEmail($recipient, $subject, $htmlContent = null, $textContent = nul
 		$out['err'] = 'Message content is required';
 		return $out;
 	}
+
+	$skipUnsub = !empty($options['skip_list_unsubscribe']);
+	$unsubHeaders = array('list_unsubscribe' => '', 'list_unsubscribe_post' => '', 'url' => '', 'ok' => false);
+	if (!$skipUnsub && function_exists('suppression_unsub_issue')) {
+		$issued = suppression_unsub_issue($to, array(
+			'provider' => 'sendgrid',
+			'issued_by' => isset($options['campaign_id']) ? (string)$options['campaign_id'] : 'sendgrid'
+		));
+		if (empty($issued['ok']) && function_exists('unsub_client_ready') && unsub_client_ready()) {
+			$out['status'] = 'configuration_error';
+			$out['err'] = 'Unsubscribe URL issue failed: '.(isset($issued['err']) ? $issued['err'] : 'unknown');
+			sendgrid_log('error', $out['err']);
+			return $out;
+		}
+		if (!empty($issued['ok']) && $issued['url'] !== '') {
+			$url = $issued['url'];
+			$safe = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+			if (trim($html) !== '') {
+				$html .= "\n<p style=\"margin-top:2em;font-size:12px;font-family:Arial,sans-serif;color:#444;\">"
+					.'If you no longer wish to receive these emails, '
+					.'<a href="'.$safe.'">unsubscribe here</a>.</p>';
+			}
+			$footerText = "\n\n---\nIf you no longer wish to receive these emails, unsubscribe here:\n".$url."\n";
+			if (trim($text) !== '') $text .= $footerText;
+			else if (trim($html) !== '') $text = trim(strip_tags($html));
+			$cfgM = function_exists('suppression_config') ? suppression_config() : array('mailto_unsub' => '');
+			$parts = array();
+			if (!empty($cfgM['mailto_unsub']) && strpos($cfgM['mailto_unsub'], '@') !== false) {
+				$parts[] = '<mailto:'.$cfgM['mailto_unsub'].'?subject=unsubscribe>';
+			}
+			$parts[] = '<'.$url.'>';
+			$unsubHeaders['list_unsubscribe'] = implode(', ', $parts);
+			$unsubHeaders['list_unsubscribe_post'] = (stripos($url, 'https://') === 0) ? 'List-Unsubscribe=One-Click' : '';
+			$unsubHeaders['url'] = $url;
+			$unsubHeaders['ok'] = $unsubHeaders['list_unsubscribe_post'] !== '';
+			if (unsub_client_ready() && empty($unsubHeaders['ok'])) {
+				$out['status'] = 'configuration_error';
+				$out['err'] = 'Unsubscribe URL must be HTTPS for RFC 8058';
+				return $out;
+			}
+		}
+	}
+	$options['__unsub_headers'] = $unsubHeaders;
 
 	$fromEmail = !empty($options['from_email']) ? trim((string)$options['from_email']) : $cfg['from_email'];
 	$fromName = array_key_exists('from_name', $options) ? (string)$options['from_name'] : $cfg['from_name'];
@@ -196,6 +248,12 @@ function sendgrid_send_via_sdk(array $cfg, $to, $subject, $html, $text, $fromEma
 				$type = isset($att['type']) ? $att['type'] : 'application/octet-stream';
 				$disp = isset($att['disposition']) ? $att['disposition'] : 'attachment';
 				$email->addAttachment($att['content'], $type, $att['filename'], $disp);
+			}
+		}
+		if (!empty($options['__unsub_headers']['list_unsubscribe'])) {
+			$email->addHeader('List-Unsubscribe', $options['__unsub_headers']['list_unsubscribe']);
+			if (!empty($options['__unsub_headers']['list_unsubscribe_post'])) {
+				$email->addHeader('List-Unsubscribe-Post', $options['__unsub_headers']['list_unsubscribe_post']);
 			}
 		}
 
@@ -261,6 +319,14 @@ function sendgrid_send_via_curl(array $cfg, $to, $subject, $html, $text, $fromEm
 	);
 	if ($replyTo !== '' && filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
 		$payload['reply_to'] = array('email' => $replyTo);
+	}
+	if (!empty($options['__unsub_headers']['list_unsubscribe'])) {
+		$payload['headers'] = array(
+			'List-Unsubscribe' => $options['__unsub_headers']['list_unsubscribe']
+		);
+		if (!empty($options['__unsub_headers']['list_unsubscribe_post'])) {
+			$payload['headers']['List-Unsubscribe-Post'] = $options['__unsub_headers']['list_unsubscribe_post'];
+		}
 	}
 	if (!empty($options['attachments']) && is_array($options['attachments'])) {
 		$atts = array();

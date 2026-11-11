@@ -1,70 +1,49 @@
-# Global suppressions, bounces, and unsubscribe
+# Global suppressions and centralized unsubscribe
 
-Phase 3 — independent of SendGrid analytics DB and of skipped Phase 2 unified message events.
+## Architecture
 
-## Storage
+- **System of record:** Hostinger Unsubscribe Service (`unsub-service/`) on MariaDB  
+  Public: `https://mail.omnidigitalsuite.com/u/{token}`  
+  API: `https://mail.omnidigitalsuite.com/api/v1/*`
+- **Desktop cache:** `data/suppressions.sqlite` (pulled from central)
+- **Providers:** SendGrid, KumoMTA, Normal+SOCKS all use `suppression_is_blocked()` before send
 
-- SQLite: `data/suppressions.sqlite`
-- Tables: `suppression_global`, `suppression_audit`, `soft_bounce_events`
-- Optional exclude files: `exclude_{lane}_{cc}.txt` (e.g. `exclude_kumomta_pt.txt`)
+When `UNSUB_SERVICE_ENABLED=true`, marketing sends:
 
-## Reasons
+1. Fail-closed if the local cache is stale and central sync is unavailable  
+2. Issue an **opaque** HTTPS unsubscribe URL (no email in the link)  
+3. Add HTML/text footer + `List-Unsubscribe` / `List-Unsubscribe-Post` (RFC 8058)
 
-`hard_bounce` · `soft_bounce` · `complaint` · `unsubscribe` · `manual` · `invalid` · `block` · `exclude`
+## Env
 
-## Pre-send
+```
+UNSUB_SERVICE_ENABLED=false
+UNSUB_SERVICE_BASE_URL=https://mail.omnidigitalsuite.com
+UNSUB_API_KEY=
+UNSUB_ADMIN_API_KEY=
+UNSUB_REQUIRE_FRESH=true
+UNSUB_CACHE_MAX_AGE_SECONDS=300
+UNSUB_TOKEN_TTL_SECONDS=63072000
+UNSUBSCRIBE_MAILTO=unsub@omnidigitalsuite.com
+SUPPRESSION_ENABLED=true
+```
 
-All three methods call `suppression_is_blocked($email)` before submit when `SUPPRESSION_ENABLED=true` (default):
-
-- SendGrid → inside `sendEmail()`
-- KumoMTA → inside `kumomta_send_email()`
-- Normal/SOCKS → inside `mailer_socks_send_attempt()`
-
-Blocked recipients are **not** submitted. Campaign loops should treat status `excluded` as a permanent skip (mark done) so the address is not retried forever.
+Keep `UNSUB_SERVICE_ENABLED=false` until the Hostinger service is deployed and `/api/v1/health` returns ok.
 
 ## Soft bounce policy
-
-Configurable:
 
 ```
 SUPPRESSION_SOFT_BOUNCE_MAX=3
 SUPPRESSION_SOFT_BOUNCE_DAYS=14
 ```
 
-After N soft-bounce events for the same address inside the window → auto global suppress (`soft_bounce`).
+## Removal
 
-## SendGrid import
+Desktop UI remove requires the **admin** API key on the central service (`UNSUB_ADMIN_API_KEY`) plus email confirmation. The mailer API key cannot delete suppressions.
 
-After SendGrid sync pulls provider suppressions into `sg_suppressions`, the sync also **additively** imports them into the global list (`suppression_import_sendgrid_local`). Mapping:
+## Deploy Hostinger
 
-| SendGrid type | Global reason |
-|---------------|---------------|
-| bounce | hard_bounce |
-| spamreport | complaint |
-| block | block |
-| invalid | invalid |
-| unsubscribe | unsubscribe |
-
-Manual re-import: `suppression_api.php?action=import_sendgrid`
-
-## One-click unsubscribe (Kumo marketing)
-
-1. Set a reachable base URL (LAN/VPN/public as appropriate):
-
-```
-UNSUBSCRIBE_BASE_URL=http://your-host/ayb-mailer/unsubscribe.php
-UNSUBSCRIBE_SECRET=long-random-string
-UNSUBSCRIBE_MAILTO=unsub@omnidigitalsuite.com
-```
-
-2. Kumo sends add `List-Unsubscribe` (+ `List-Unsubscribe-Post` when the URL is absolute `http(s)`).
-3. `unsubscribe.php` validates the HMAC token and adds `unsubscribe` to the global list.
-
-Invalid/expired tokens make **no** change.
-
-## API
-
-`suppression_api.php` actions: `list`, `add`, `remove`, `check`, `counts`, `audit`, `soft_bounce`, `import_sendgrid`.
+See `unsub-service/README.md` and `unsub-service/sql/schema.sql`.
 
 ## Offline test
 
@@ -72,10 +51,9 @@ Invalid/expired tokens make **no** change.
 php tests/suppression_offline_test.php
 ```
 
-## Feature flag / rollback
+## Feature flags
 
 ```
-SUPPRESSION_ENABLED=false
+SUPPRESSION_ENABLED=false          # opens pre-send gate
+UNSUB_SERVICE_ENABLED=false        # local/legacy mode only
 ```
-
-Disables the pre-send gate (lists and unsubscribe endpoint still work).

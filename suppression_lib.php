@@ -5,6 +5,7 @@
  * Storage: data/suppressions.sqlite
  */
 require_once __DIR__.DIRECTORY_SEPARATOR.'env_load.php';
+require_once __DIR__.DIRECTORY_SEPARATOR.'unsub_client.php';
 
 if (!defined('AYB_SUPPRESSIONS_DB')) {
 	define('AYB_SUPPRESSIONS_DB', __DIR__.DIRECTORY_SEPARATOR.'data'.DIRECTORY_SEPARATOR.'suppressions.sqlite');
@@ -13,13 +14,19 @@ if (!defined('AYB_SUPPRESSIONS_DB')) {
 function suppression_config()
 {
 	ayb_env_load();
+	$svc = unsub_client_config();
 	return array(
 		'enabled' => ayb_env_bool('SUPPRESSION_ENABLED', true),
 		'soft_max' => max(1, intval(ayb_env('SUPPRESSION_SOFT_BOUNCE_MAX', '3'))),
 		'soft_days' => max(1, intval(ayb_env('SUPPRESSION_SOFT_BOUNCE_DAYS', '14'))),
+		// Legacy local HMAC base (dev only when service disabled)
 		'unsub_base_url' => rtrim(ayb_env('UNSUBSCRIBE_BASE_URL', ''), '/'),
 		'unsub_secret' => ayb_env('UNSUBSCRIBE_SECRET', ''),
-		'mailto_unsub' => ayb_env('UNSUBSCRIBE_MAILTO', '')
+		'mailto_unsub' => ayb_env('UNSUBSCRIBE_MAILTO', ''),
+		'service_enabled' => !empty($svc['enabled']),
+		'service_base' => $svc['base_url'],
+		'require_fresh' => !empty($svc['require_fresh']),
+		'cache_max_age' => intval($svc['cache_max_age'])
 	);
 }
 
@@ -134,6 +141,12 @@ function suppression_add($email, $reason, $sourceMethod = '', $detail = '', $act
 	if ($changed) {
 		suppression_audit($email, $prev ? 'update' : 'add', $reason, $sourceMethod, $detail, $actor);
 	}
+	// Push to central SoT when service enabled (best-effort; local cache remains authoritative for this process)
+	if ($changed && unsub_client_ready() && $actor !== 'unsub_sync') {
+		$push = unsub_client_push_suppression($email, $reason, $sourceMethod, $detail, $actor);
+		$out['remote_ok'] = !empty($push['ok']);
+		if (empty($push['ok'])) $out['remote_err'] = isset($push['err']) ? $push['err'] : 'push_failed';
+	}
 	return $out;
 }
 
@@ -163,6 +176,15 @@ function suppression_remove($email, $actor = 'operator', $detail = '')
 		$out['ok'] = true;
 		$out['err'] = 'not found';
 		return $out;
+	}
+	// Central SoT: admin-only remote remove first when service enabled
+	if (unsub_client_ready()) {
+		$remote = unsub_client_admin_remove($email, $detail !== '' ? $detail : 'manual remove', $actor);
+		if (empty($remote['ok'])) {
+			$out['err'] = 'remote_remove_denied_or_failed';
+			if (!empty($remote['err'])) $out['err'] .= ':'.$remote['err'];
+			return $out;
+		}
 	}
 	$st = suppression_db()->prepare('DELETE FROM suppression_global WHERE email = ? COLLATE NOCASE');
 	$st->execute(array($email));
@@ -299,6 +321,81 @@ function suppression_maybe_from_smtp_failure($email, $smtpCode, $smtpReply, $sou
 }
 
 /**
+ * Pull central suppressions into local SQLite cache.
+ */
+function suppression_sync_from_service()
+{
+	$out = array('ok' => false, 'pulled' => 0, 'err' => '');
+	if (!unsub_client_ready()) {
+		$out['err'] = 'service_disabled';
+		return $out;
+	}
+	$pull = unsub_client_pull(function ($row) {
+		$email = isset($row['email']) ? $row['email'] : (isset($row['email_norm']) ? $row['email_norm'] : '');
+		$email = suppression_normalize_email($email);
+		if ($email === '') return;
+		if (!empty($row['removed_at'])) {
+			$prev = suppression_get($email);
+			if ($prev) {
+				$st = suppression_db()->prepare('DELETE FROM suppression_global WHERE email = ? COLLATE NOCASE');
+				$st->execute(array($email));
+				suppression_audit($email, 'remove', isset($prev['reason']) ? $prev['reason'] : '', 'unsub_sync', 'Remote soft-remove sync', 'unsub_sync');
+			}
+			return;
+		}
+		$reason = isset($row['reason']) ? $row['reason'] : 'manual';
+		$source = isset($row['source']) ? $row['source'] : 'unsub_sync';
+		$detail = isset($row['detail']) ? $row['detail'] : 'synced from central';
+		// Local write without re-push
+		$emailN = $email;
+		$reason = suppression_valid_reason($reason);
+		$pdo = suppression_db();
+		$prev = suppression_get($emailN);
+		$st = $pdo->prepare('INSERT INTO suppression_global(email, reason, source_method, detail, created_at, updated_at)
+			VALUES(?,?,?,?,datetime(\'now\'),datetime(\'now\'))
+			ON CONFLICT(email) DO UPDATE SET
+				reason=excluded.reason,
+				source_method=excluded.source_method,
+				detail=excluded.detail,
+				updated_at=datetime(\'now\')');
+		$st->execute(array($emailN, $reason, substr((string)$source, 0, 40), substr((string)$detail, 0, 500)));
+		$changed = !$prev || (isset($prev['reason']) && $prev['reason'] !== $reason);
+		if ($changed) suppression_audit($emailN, $prev ? 'update' : 'add', $reason, $source, $detail, 'unsub_sync');
+	});
+	return $pull;
+}
+
+/**
+ * Whether marketing sends may proceed under fail-closed sync policy.
+ * @return array{ok:bool,err:string,cache_age:int}
+ */
+function suppression_sync_allow_marketing()
+{
+	$cfg = suppression_config();
+	$out = array('ok' => true, 'err' => '', 'cache_age' => 0);
+	if (empty($cfg['service_enabled'])) return $out;
+	if (!unsub_client_ready()) {
+		$out['ok'] = false;
+		$out['err'] = 'Unsubscribe service enabled but not fully configured (HTTPS base + API key required)';
+		return $out;
+	}
+	$age = unsub_client_cache_age_seconds();
+	$out['cache_age'] = $age;
+	// Opportunistic pull when stale-ish
+	if ($age > min(60, intval($cfg['cache_max_age']))) {
+		suppression_sync_from_service();
+		$age = unsub_client_cache_age_seconds();
+		$out['cache_age'] = $age;
+	}
+	if (!empty($cfg['require_fresh']) && $age > intval($cfg['cache_max_age'])) {
+		$out['ok'] = false;
+		$out['err'] = 'Unsubscribe cache stale ('.$age.'s > '.$cfg['cache_max_age'].'s) and central sync unavailable — marketing fail-closed';
+		return $out;
+	}
+	return $out;
+}
+
+/**
  * Pre-send gate.
  * @return array{blocked:bool,reason:string,source:string,detail:string}
  */
@@ -323,6 +420,22 @@ function suppression_is_blocked($email, array $opts = array())
 		$out['source'] = isset($row['source_method']) ? $row['source_method'] : '';
 		$out['detail'] = isset($row['detail']) ? $row['detail'] : '';
 		return $out;
+	}
+
+	// Live check on cache miss when central service is ready
+	if (unsub_client_ready() && empty($opts['skip_remote_check'])) {
+		$chk = unsub_client_check($email);
+		if (!empty($chk['ok']) && is_array($chk['body']) && !empty($chk['body']['blocked'])) {
+			$reason = isset($chk['body']['reason']) ? $chk['body']['reason'] : 'unsubscribe';
+			$source = isset($chk['body']['source']) ? $chk['body']['source'] : 'remote_check';
+			$detail = isset($chk['body']['detail']) ? $chk['body']['detail'] : 'Central suppression hit';
+			suppression_add($email, $reason, $source, $detail, 'unsub_sync');
+			$out['blocked'] = true;
+			$out['reason'] = suppression_valid_reason($reason);
+			$out['source'] = $source;
+			$out['detail'] = $detail;
+			return $out;
+		}
 	}
 
 	$lane = isset($opts['lane']) ? (string)$opts['lane'] : '';
@@ -450,12 +563,11 @@ function suppression_import_sendgrid_local()
 	return $out;
 }
 
-/** HMAC token for one-click unsubscribe (email|exp). */
+/** Legacy HMAC secret (dev/local only when central service disabled). */
 function suppression_unsub_secret()
 {
 	$cfg = suppression_config();
 	if ($cfg['unsub_secret'] !== '') return $cfg['unsub_secret'];
-	// Derive a stable local secret from machine path when unset (dev/LAN only)
 	return hash('sha256', 'ayb-unsub|'.__DIR__.'|'.AYB_SUPPRESSIONS_DB);
 }
 
@@ -463,7 +575,6 @@ function suppression_unsub_token($email, $ttlSeconds = 31536000)
 {
 	$email = suppression_normalize_email($email);
 	$exp = time() + max(3600, intval($ttlSeconds));
-	// Use newlines so domain dots in email never collide with separators
 	$payload = $email."\n".$exp;
 	$sig = hash_hmac('sha256', $payload, suppression_unsub_secret());
 	return rtrim(strtr(base64_encode($payload."\n".$sig), '+/', '-_'), '=');
@@ -508,50 +619,116 @@ function suppression_unsub_parse_token($token)
 	return $out;
 }
 
-function suppression_unsub_url($email)
+/**
+ * Issue marketing unsubscribe URL.
+ * Prefers central opaque Hostinger token when UNSUB_SERVICE_ENABLED.
+ * @return array{ok:bool,url:string,err:string}
+ */
+function suppression_unsub_issue($email, array $opts = array())
+{
+	$out = array('ok' => false, 'url' => '', 'err' => '');
+	$email = suppression_normalize_email($email);
+	if ($email === '' || strpos($email, '@') === false) {
+		$out['err'] = 'invalid_email';
+		return $out;
+	}
+	if (unsub_client_ready()) {
+		$r = unsub_client_issue_token($email, $opts);
+		if (!empty($r['ok']) && is_array($r['body']) && !empty($r['body']['url'])) {
+			$url = (string)$r['body']['url'];
+			if (stripos($url, 'https://') !== 0) {
+				$out['err'] = 'non_https_url';
+				return $out;
+			}
+			$out['ok'] = true;
+			$out['url'] = $url;
+			return $out;
+		}
+		$out['err'] = isset($r['err']) ? $r['err'] : 'token_issue_failed';
+		return $out;
+	}
+	// Legacy local HMAC (not for production one-click)
+	$out['ok'] = true;
+	$out['url'] = suppression_unsub_url_legacy($email);
+	return $out;
+}
+
+function suppression_unsub_url_legacy($email)
 {
 	$cfg = suppression_config();
 	$base = $cfg['unsub_base_url'];
 	if ($base === '') {
-		// Relative fallback for same-host local app
 		$base = 'unsubscribe.php';
-		$token = suppression_unsub_token($email);
-		return $base.'?token='.rawurlencode($token);
+		return $base.'?token='.rawurlencode(suppression_unsub_token($email));
 	}
 	$token = suppression_unsub_token($email);
 	$sep = (strpos($base, '?') !== false) ? '&' : '?';
-	// If base already points to unsubscribe.php keep it; else append
 	if (stripos($base, 'unsubscribe.php') === false) {
 		$base = rtrim($base, '/').'/unsubscribe.php';
 	}
 	return $base.$sep.'token='.rawurlencode($token);
 }
 
+/** @deprecated use suppression_unsub_issue */
+function suppression_unsub_url($email)
+{
+	$issued = suppression_unsub_issue($email);
+	return !empty($issued['ok']) ? $issued['url'] : '';
+}
+
+/**
+ * Append unsubscribe footer for marketing bodies.
+ * @return array{html:string,text:string,url:string,ok:bool,err:string}
+ */
+function suppression_append_unsubscribe_footer($html, $text, $email, array $opts = array())
+{
+	$out = array('html' => (string)$html, 'text' => (string)$text, 'url' => '', 'ok' => false, 'err' => '');
+	$issued = suppression_unsub_issue($email, $opts);
+	if (empty($issued['ok']) || $issued['url'] === '') {
+		$out['err'] = isset($issued['err']) ? $issued['err'] : 'no_url';
+		return $out;
+	}
+	$url = $issued['url'];
+	$out['url'] = $url;
+	$safe = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+	$footerHtml = "\n<p style=\"margin-top:2em;font-size:12px;font-family:Arial,sans-serif;color:#444;\">"
+		.'If you no longer wish to receive these emails, '
+		.'<a href="'.$safe.'">unsubscribe here</a>.</p>';
+	$footerText = "\n\n---\nIf you no longer wish to receive these emails, unsubscribe here:\n".$url."\n";
+	if (trim($out['html']) !== '') $out['html'] .= $footerHtml;
+	if (trim($out['text']) !== '') $out['text'] .= $footerText;
+	else if (trim($out['html']) !== '') $out['text'] = trim(strip_tags($out['html']))."\n".$footerText;
+	$out['ok'] = true;
+	return $out;
+}
+
 /**
  * Headers for marketing List-Unsubscribe (RFC 8058 one-click when HTTPS URL available).
- * @return array{list_unsubscribe:string,list_unsubscribe_post:string}
+ * @return array{list_unsubscribe:string,list_unsubscribe_post:string,url:string,ok:bool,err:string}
  */
-function suppression_list_unsubscribe_headers($email)
+function suppression_list_unsubscribe_headers($email, array $opts = array())
 {
 	$cfg = suppression_config();
-	$url = suppression_unsub_url($email);
+	$out = array('list_unsubscribe' => '', 'list_unsubscribe_post' => '', 'url' => '', 'ok' => false, 'err' => '');
+	$issued = suppression_unsub_issue($email, $opts);
+	if (empty($issued['ok']) || $issued['url'] === '') {
+		$out['err'] = isset($issued['err']) ? $issued['err'] : 'no_url';
+		return $out;
+	}
+	$url = $issued['url'];
+	$out['url'] = $url;
 	$parts = array();
 	if ($cfg['mailto_unsub'] !== '' && strpos($cfg['mailto_unsub'], '@') !== false) {
 		$parts[] = '<mailto:'.$cfg['mailto_unsub'].'?subject=unsubscribe>';
 	}
-	// Absolute http(s) preferred for List-Unsubscribe-Post
-	$abs = $url;
-	if (strpos($url, 'http://') !== 0 && strpos($url, 'https://') !== 0) {
-		// Keep relative URL in angle brackets only if no absolute base configured
-		$parts[] = '<'.$url.'>';
-		return array(
-			'list_unsubscribe' => implode(', ', $parts),
-			'list_unsubscribe_post' => ''
-		);
+	$parts[] = '<'.$url.'>';
+	$out['list_unsubscribe'] = implode(', ', $parts);
+	if (stripos($url, 'https://') === 0) {
+		$out['list_unsubscribe_post'] = 'List-Unsubscribe=One-Click';
+		$out['ok'] = true;
+	} else {
+		$out['err'] = 'url_not_https';
+		$out['ok'] = false;
 	}
-	$parts[] = '<'.$abs.'>';
-	return array(
-		'list_unsubscribe' => implode(', ', $parts),
-		'list_unsubscribe_post' => 'List-Unsubscribe=One-Click'
-	);
+	return $out;
 }

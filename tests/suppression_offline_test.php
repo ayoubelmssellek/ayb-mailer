@@ -39,6 +39,12 @@ putenv('UNSUBSCRIBE_SECRET=test-secret-phase3');
 $_ENV['UNSUBSCRIBE_SECRET'] = 'test-secret-phase3';
 putenv('UNSUBSCRIBE_BASE_URL=https://example.test/ayb-mailer/unsubscribe.php');
 $_ENV['UNSUBSCRIBE_BASE_URL'] = 'https://example.test/ayb-mailer/unsubscribe.php';
+putenv('UNSUB_SERVICE_ENABLED=false');
+$_ENV['UNSUB_SERVICE_ENABLED'] = 'false';
+putenv('UNSUB_API_KEY=');
+$_ENV['UNSUB_API_KEY'] = '';
+putenv('UNSUB_ADMIN_API_KEY=');
+$_ENV['UNSUB_ADMIN_API_KEY'] = '';
 
 t_assert(empty(suppression_is_blocked('ok@example.com')['blocked']), 'clean address not blocked');
 
@@ -102,8 +108,15 @@ t_assert(strpos($idx, 'global-suppression-card') !== false, 'index has suppressi
 
 $envEx = file_get_contents($root.DIRECTORY_SEPARATOR.'.env.example');
 t_assert(strpos($envEx, 'SUPPRESSION_ENABLED=') !== false, '.env.example has SUPPRESSION_ENABLED');
+t_assert(strpos($envEx, 'UNSUB_SERVICE_ENABLED=') !== false, '.env.example has UNSUB_SERVICE_ENABLED');
 t_assert(is_file($root.DIRECTORY_SEPARATOR.'unsubscribe.php'), 'unsubscribe.php exists');
+t_assert(is_file($root.DIRECTORY_SEPARATOR.'unsub_client.php'), 'unsub_client.php exists');
+t_assert(is_file($root.DIRECTORY_SEPARATOR.'unsub-service'.DIRECTORY_SEPARATOR.'sql'.DIRECTORY_SEPARATOR.'schema.sql'), 'Hostinger schema.sql exists');
+t_assert(is_file($root.DIRECTORY_SEPARATOR.'unsub-service'.DIRECTORY_SEPARATOR.'public'.DIRECTORY_SEPARATOR.'index.php'), 'Hostinger public index exists');
 t_assert(is_file($root.DIRECTORY_SEPARATOR.'docs'.DIRECTORY_SEPARATOR.'SUPPRESSION.md'), 'SUPPRESSION.md exists');
+t_assert(empty(unsub_client_ready()), 'central service not ready in offline test');
+$issued = suppression_unsub_issue('news@example.com');
+t_assert(!empty($issued['ok']) && strpos($issued['url'], 'https://example.test/') === 0, 'legacy issue URL when service off');
 
 // Feature flag off
 putenv('SUPPRESSION_ENABLED=false');

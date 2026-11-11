@@ -716,14 +716,35 @@ function warmup_update_plan($method, array $fields, $actor = 'operator')
 		$args[] = !empty($fields['require_manual_increase']) ? 1 : 0;
 	}
 	// Direct daily/hourly set: if increasing and require_manual → pending path
+	// Presentation flags (pending/applied/unchanged) only — enforcement rules unchanged.
+	$capChange = null;
 	if (isset($fields['current_daily_cap']) || isset($fields['hourly_cap'])) {
 		$daily = isset($fields['current_daily_cap']) ? intval($fields['current_daily_cap']) : intval($plan['current_daily_cap']);
 		$hourly = isset($fields['hourly_cap']) ? intval($fields['hourly_cap']) : intval($plan['hourly_cap']);
-		if (!empty($plan['require_manual_increase']) && $daily > intval($plan['current_daily_cap'])) {
-			$req = warmup_request_increase($method, $daily, $hourly, isset($fields['reason']) ? $fields['reason'] : 'Dashboard increase request', $actor);
-			// still apply other field updates
+		$curDaily = intval($plan['current_daily_cap']);
+		$curHourly = intval($plan['hourly_cap']);
+		if ($daily === $curDaily && $hourly === $curHourly) {
+			$capChange = array(
+				'ok' => true,
+				'pending' => false,
+				'applied' => false,
+				'unchanged' => true,
+				'daily' => $curDaily,
+				'hourly' => $curHourly,
+				'requested_daily' => $daily,
+				'requested_hourly' => $hourly
+			);
+		} else if (!empty($plan['require_manual_increase']) && $daily > $curDaily) {
+			$capChange = warmup_request_increase($method, $daily, $hourly, isset($fields['reason']) ? $fields['reason'] : 'Dashboard increase request', $actor);
+			$capChange['unchanged'] = false;
+			$capChange['requested_daily'] = $daily;
+			$capChange['requested_hourly'] = $hourly;
+			// still apply other field updates below
 		} else {
-			warmup_apply_caps($planId, $daily, $hourly, isset($fields['reason']) ? $fields['reason'] : 'Dashboard cap update', $actor);
+			$capChange = warmup_apply_caps($planId, $daily, $hourly, isset($fields['reason']) ? $fields['reason'] : 'Dashboard cap update', $actor);
+			$capChange['unchanged'] = false;
+			$capChange['requested_daily'] = $daily;
+			$capChange['requested_hourly'] = $hourly;
 		}
 	}
 	if (!empty($set)) {
@@ -732,7 +753,15 @@ function warmup_update_plan($method, array $fields, $actor = 'operator')
 		$pdo->prepare('UPDATE warmup_plans SET '.implode(',', $set).' WHERE id=?')->execute($args);
 		warmup_decision($planId, 'plan_update', 'Plan fields updated', $actor, $fields);
 	}
-	return array('ok' => true, 'plan' => warmup_get_plan($method));
+	$out = array('ok' => true, 'plan' => warmup_get_plan($method));
+	if (is_array($capChange)) {
+		$out['pending'] = !empty($capChange['pending']);
+		$out['applied'] = !empty($capChange['applied']);
+		$out['unchanged'] = !empty($capChange['unchanged']);
+		$out['cap_change'] = $capChange;
+		if (isset($capChange['pending_id'])) $out['pending_id'] = $capChange['pending_id'];
+	}
+	return $out;
 }
 
 function warmup_status($method = 'kumomta')

@@ -1,9 +1,19 @@
 <?php
 /**
- * One-click / browser unsubscribe endpoint for KumoMTA marketing mail.
- * GET/POST with token=… (HMAC). RFC 8058 one-click uses POST List-Unsubscribe=One-Click.
+ * LEGACY local unsubscribe endpoint (HMAC token; email recoverable from token).
+ * Production one-click must use the Hostinger service: /u/{opaque-token}
+ * Keep this file only for local/dev when UNSUB_SERVICE_ENABLED=false.
  */
 require_once __DIR__.DIRECTORY_SEPARATOR.'suppression_lib.php';
+
+if (function_exists('unsub_client_ready') && unsub_client_ready()) {
+	header('Content-Type: text/plain; charset=utf-8');
+	header('Cache-Control: no-store');
+	http_response_code(503);
+	echo "This local endpoint is disabled while the central unsubscribe service is enabled.\n";
+	echo "Use the HTTPS link from your email (Hostinger /u/{token}).\n";
+	exit;
+}
 
 function unsub_wants_json()
 {

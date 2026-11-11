@@ -1,0 +1,18 @@
+# Secondary protection if /public/ is requested directly
+Options -Indexes
+RewriteEngine On
+
+RewriteRule (^|/)\. - [F,L]
+RewriteRule ^config\.php$ - [F,L]
+RewriteRule ^src(?:/|$) - [F,L]
+
+# Front controller within /public/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]
+
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Referrer-Policy "no-referrer"
+  Header set X-Frame-Options "DENY"
+</IfModule>

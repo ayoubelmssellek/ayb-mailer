@@ -379,6 +379,74 @@ body.send-mode .app-shell{display:none!important}
 .stats-dash .ra-hist li{margin:0 0 8px;color:#c5d0dc;line-height:1.4}
 .stats-dash .ra-sync{font-size:12px;color:#8b9bb0;margin-top:8px;line-height:1.45}
 @media(max-width:900px){.stats-dash .ra-filters input[type=text],.stats-dash .ra-filters input[type=search]{min-width:120px}}
+/* Ops dashboard panels (Analytics / Warm-up / Logs) — Runway-inspired dark surfaces */
+.ops-dash{background:#000;border:1px solid #27272a;border-radius:12px;padding:18px 18px 16px;color:#fff;margin:0 0 16px}
+.ops-dash *{box-sizing:border-box}
+.ops-dash .ops-label{font-size:11px;font-weight:500;letter-spacing:.35px;text-transform:uppercase;color:#767d88;margin:0 0 6px}
+.ops-dash .ops-title{margin:0 0 8px;font-size:28px;font-weight:400;letter-spacing:-.6px;line-height:1.05;color:#fff}
+.ops-dash .ops-lead{margin:0 0 14px;font-size:13px;line-height:1.45;color:#767d88;max-width:72ch}
+.ops-dash .ops-lead b{color:#c9ccd1;font-weight:600}
+.ops-dash .ops-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
+.ops-dash .ops-filters select,.ops-dash .ops-filters input[type=search],.ops-dash .ops-filters input[type=text],.ops-dash .ops-filters input[type=number],.ops-dash .ops-filters input[type=date]{background:#1a1a1a;border:1px solid #27272a;color:#fff;border-radius:6px;padding:8px 10px;font:inherit;font-size:13px}
+.ops-dash .ops-btn{background:#1a1a1a;color:#e8eef5;border:1px solid #27272a;border-radius:6px;padding:8px 14px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit}
+.ops-dash .ops-btn:hover{border-color:#2ee59d;color:#2ee59d}
+.ops-dash .ops-btn.primary{border-color:#2ee59d;color:#2ee59d;background:rgba(46,229,157,.08)}
+.ops-dash .ops-btn.danger{border-color:#ff5d6c;color:#ff5d6c;background:rgba(255,93,108,.08)}
+.ops-dash .ops-btn:disabled{opacity:.5;cursor:wait}
+.ops-dash .ops-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:0 0 14px}
+.ops-dash .ops-kpi{background:#1a1a1a;border:1px solid #27272a;border-radius:8px;padding:12px 14px}
+.ops-dash .ops-kpi b{display:block;font-size:22px;font-variant-numeric:tabular-nums;line-height:1.1;color:#fff;font-weight:600}
+.ops-dash .ops-kpi span{display:block;margin-top:6px;font-size:10px;color:#767d88;text-transform:uppercase;letter-spacing:.4px}
+.ops-dash .ops-kpi em{display:block;margin-top:4px;font-style:normal;font-size:11px;color:#a7a7a7}
+.ops-dash .ops-kpi.ok b{color:#2ee59d}
+.ops-dash .ops-kpi.fail b{color:#ff5d6c}
+.ops-dash .ops-kpi.warn b{color:#ffc14d}
+.ops-dash .ops-kpi.info b{color:#5eb3ff}
+.ops-dash .ops-kpi.mute b{color:#a7a7a7}
+.ops-dash .ops-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 14px}
+.ops-dash .ops-panel{background:#1a1a1a;border:1px solid #27272a;border-radius:8px;padding:14px}
+.ops-dash .ops-panel h4{margin:0 0 10px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#767d88}
+.ops-dash .ops-status-row{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.ops-dash .ops-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #27272a;border-radius:6px;padding:6px 10px;font-size:12px;color:#c9ccd1;background:#121212}
+.ops-dash .ops-chip i{width:7px;height:7px;border-radius:50%;background:#767d88;display:inline-block}
+.ops-dash .ops-chip.on i{background:#2ee59d}
+.ops-dash .ops-chip.warn i{background:#ffc14d}
+.ops-dash .ops-chip.bad i{background:#ff5d6c}
+.ops-dash .ops-bar-wrap{margin:0 0 12px}
+.ops-dash .ops-bar-meta{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#a7a7a7;margin:0 0 6px}
+.ops-dash .ops-bar{height:8px;background:#27272a;border-radius:4px;overflow:hidden}
+.ops-dash .ops-bar>i{display:block;height:100%;width:0;background:#2ee59d;border-radius:4px;transition:width .3s ease}
+.ops-dash .ops-bar.warn>i{background:#ffc14d}
+.ops-dash .ops-bar.full>i{background:#ff5d6c}
+.ops-dash .ops-warn{border:1px solid rgba(255,193,77,.35);background:rgba(255,193,77,.08);color:#ffc14d;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.45;margin:0 0 12px}
+.ops-dash .ops-warn.bad{border-color:rgba(255,93,108,.35);background:rgba(255,93,108,.08);color:#ff5d6c}
+.ops-dash .ops-info{border:1px solid #27272a;background:#121212;color:#a7a7a7;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.45;margin:0 0 12px}
+.ops-dash .ops-info b{color:#e8eef5}
+.ops-dash .ops-toast{min-height:18px;font-size:12px;color:#767d88;margin-top:10px}
+.ops-dash .ops-toast.ok{color:#2ee59d}
+.ops-dash .ops-toast.warn{color:#ffc14d}
+.ops-dash .ops-toast.fail{color:#ff5d6c}
+.ops-dash .ops-table-wrap{overflow:auto;border:1px solid #27272a;border-radius:8px;background:#121212;max-height:360px}
+.ops-dash .ops-table{width:100%;border-collapse:collapse;font-size:12px;min-width:640px}
+.ops-dash .ops-table th,.ops-dash .ops-table td{padding:9px 10px;border-bottom:1px solid #27272a;text-align:left;vertical-align:top}
+.ops-dash .ops-table th{color:#767d88;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.35px;position:sticky;top:0;background:#1a1a1a}
+.ops-dash .ops-table td{color:#e8eef5}
+.ops-dash .ops-table tr.expandable{cursor:pointer}
+.ops-dash .ops-table tr.expandable:hover td{background:rgba(255,255,255,.03)}
+.ops-dash .ops-table .detail-row td{background:#0a0a0a;color:#a7a7a7;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.ops-dash .ops-spark{display:flex;align-items:flex-end;gap:3px;height:72px;padding:8px 0}
+.ops-dash .ops-spark i{flex:1;min-width:4px;background:#2ee59d;border-radius:2px 2px 0 0;opacity:.85}
+.ops-dash .ops-empty{padding:28px 16px;text-align:center;color:#767d88;font-size:13px}
+.ops-dash .ops-sec{margin:18px 0 8px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#767d88}
+.ops-dash .ops-field{display:flex;flex-direction:column;gap:6px;margin:0 0 10px}
+.ops-dash .ops-field label{font-size:11px;color:#767d88;text-transform:uppercase;letter-spacing:.35px}
+.ops-dash .ops-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.ops-dash .ops-pager{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:#767d88}
+.ops-dash .ops-compare{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 14px}
+@media(max-width:900px){
+  .ops-dash .ops-grid,.ops-dash .ops-compare{grid-template-columns:1fr}
+  .ops-dash .ops-title{font-size:22px}
+}
 body.send-mode{margin:0;background:var(--bg);color:var(--text);font-family:"DM Sans",system-ui,sans-serif}
 .send-dash{position:sticky;top:0;z-index:9999;background:linear-gradient(180deg,#101820 0%,#0d131a 100%);color:var(--text);border-bottom:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.45)}
 .send-dash *{box-sizing:border-box}
@@ -660,8 +728,9 @@ $(document).ready(function(){
     <button type="button" class="sb-link" data-page="recipients">Recipients</button>
     <button type="button" class="sb-link" data-page="compose">Compose</button>
     <button type="button" class="sb-link" data-page="analytics" id="nav-analytics">Analytics</button>
-    <button type="button" class="sb-link" data-page="sendgridmail" id="nav-sendgridmail">SendGridMail</button>
     <button type="button" class="sb-link" data-page="warmup" id="nav-warmup">Warm-up</button>
+    <button type="button" class="sb-link" data-page="logs" id="nav-logs">Logs</button>
+    <button type="button" class="sb-link" data-page="sendgridmail" id="nav-sendgridmail">SendGridMail</button>
   </nav>
   <div class="sb-foot">Setup → Recipients → Compose</div>
 </aside>
@@ -920,23 +989,84 @@ document.addEventListener('DOMContentLoaded', function(){
   refreshKumoStatus();
 
 
-  // —— Analytics overview (Phase 5) ——
+  // —— Analytics overview (redesign; same APIs) ——
   function aoEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function aoSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
+  function aoMetric(v, available){
+    if(available===false) return 'Unavailable';
+    if(v==null||v==='') return 'Unavailable';
+    return String(v);
+  }
+  function aoFillCountrySelect(){
+    var sel=document.getElementById('ao-country');
+    if(!sel) return;
+    var cur=sel.value;
+    var active=(window.aybCountry?window.aybCountry():'pt');
+    var codes=[];
+    try{
+      if(typeof countryState!=='undefined' && countryState.list) codes=Object.keys(countryState.list);
+    }catch(e){}
+    if(!codes.length) codes=[active||'pt'];
+    sel.innerHTML=codes.map(function(c){
+      var name=(typeof countryState!=='undefined' && countryState.list && countryState.list[c])?countryState.list[c].name:c;
+      return '<option value="'+aoEsc(c)+'">'+aoEsc(String(c).toUpperCase()+' — '+name)+'</option>';
+    }).join('');
+    sel.value=cur||active||codes[0];
+  }
+  function aoApplyMethodFilter(){
+    var mEl=document.getElementById('ao-method');
+    var m=mEl?mEl.value:'all';
+    var nodes=document.querySelectorAll('#analytics-overview-card [data-ao-method]');
+    for(var i=0;i<nodes.length;i++){
+      var want=nodes[i].getAttribute('data-ao-method');
+      nodes[i].style.display=(m==='all'||m===want)?'':'none';
+    }
+  }
   window.loadAnalyticsOverview=function(){
+    aoFillCountrySelect();
     var daysEl=document.getElementById('ao-days');
     var days=daysEl?daysEl.value:7;
+    var cEl=document.getElementById('ao-country');
+    var country=cEl&&cEl.value?cEl.value:(window.aybCountry?window.aybCountry():'pt');
     var msg=document.getElementById('ao-msg');
-    if(msg) msg.textContent='Loading overview…';
-    fetch('analytics_overview_api.php?action=overview&days='+encodeURIComponent(days),{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ if(msg) msg.textContent='Overview failed'; return; }
+    if(msg){ msg.className='ops-toast'; msg.textContent='Loading overview…'; }
+    var url='analytics_overview_api.php?action=overview&days='+encodeURIComponent(days)+'&country='+encodeURIComponent(country);
+    fetch(url,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ if(msg){ msg.className='ops-toast fail'; msg.textContent='Overview failed'; } return; }
       var v=d.vocabulary||{};
       var vocab=document.getElementById('ao-vocab');
-      if(vocab) vocab.textContent='Accepted: '+(v.accepted||'')+' · Delivered: '+(v.delivered||'')+' · Normal OK: '+(v.ok_smtp||'');
+      if(vocab) vocab.innerHTML='<b>Accepted</b>: '+aoEsc(v.accepted||'')+' · <b>Delivered</b>: '+aoEsc(v.delivered||'')+' · <b>Normal OK</b>: '+aoEsc(v.ok_smtp||'');
       var ms=d.methods_status||{};
       aoSet('ao-sg-ready', ms.sendgrid&&ms.sendgrid.ready?'READY':'NOT READY');
       aoSet('ao-kumo-ready', ms.kumomta&&ms.kumomta.ready?'READY':'NOT READY');
       aoSet('ao-socks-ok', ms.normal_smtp&&ms.normal_smtp.ok_proxies!=null?ms.normal_smtp.ok_proxies:'—');
+
+      var sg=d.sendgrid||{};
+      var sgM=sg.metrics;
+      var sgAvail=!!(sg.configured && sgM && typeof sgM==='object');
+      aoSet('ao-kpi-delivered', aoMetric(sgAvail?(sgM.delivered!=null?sgM.delivered:null):null, sgAvail));
+
+      var thr=d.throughput||{};
+      var series=thr.days||[];
+      var kAcc=0, kFail=0;
+      for(var si=0;si<series.length;si++){ kAcc+=Number(series[si].accepted)||0; kFail+=Number(series[si].failed)||0; }
+      var kumoSeriesAvail=Array.isArray(series);
+      aoSet('ao-kpi-accepted', aoMetric(kumoSeriesAvail?kAcc:null, kumoSeriesAvail));
+      aoSet('ao-kpi-failed', aoMetric(kumoSeriesAvail?kFail:null, kumoSeriesAvail));
+
+      var sc=d.suppressions&&d.suppressions.counts?d.suppressions.counts:null;
+      var supAvail=!!(sc && (sc.total!=null));
+      aoSet('ao-kpi-suppressed', aoMetric(supAvail?sc.total:null, supAvail));
+
+      var lanes=d.queues||{};
+      var pend=0; var pendKnown=false;
+      ['api','smtp','kumomta'].forEach(function(k){
+        if(lanes[k] && lanes[k].pending_approx!=null){ pend+=Number(lanes[k].pending_approx)||0; pendKnown=true; }
+      });
+      aoSet('ao-kpi-pending', aoMetric(pendKnown?pend:null, pendKnown));
+      var pem=document.getElementById('ao-kpi-pending-em');
+      if(pem) pem.textContent='country '+String(country).toUpperCase();
+
       var md=document.getElementById('ao-methods-detail');
       if(md){
         md.innerHTML='SendGrid: '+aoEsc((ms.sendgrid&&ms.sendgrid.status)||'')+(ms.sendgrid&&ms.sendgrid.err?(' — '+aoEsc(ms.sendgrid.err)):'')+
@@ -947,71 +1077,91 @@ document.addEventListener('DOMContentLoaded', function(){
       var kb=document.getElementById('ao-kumo-box');
       if(kb){
         var ks=d.kumomta&&d.kumomta.status?d.kumomta.status:{};
-        var tail=d.kumomta&&d.kumomta.log_tail&&d.kumomta.log_tail.rows?d.kumomta.log_tail.rows:[];
-        kb.innerHTML='Status <b>'+aoEsc(ks.status||'unknown')+'</b> · '+(ks.ok?'config ready':'not ready')+(ks.err?(' — '+aoEsc(ks.err)):'')+
-          '<br>Recent log: '+(tail.length?aoEsc((tail[0].line||'').slice(0,160)):'(empty)');
+        kb.innerHTML='Kumo status <b>'+aoEsc(ks.status||'unknown')+'</b> · '+(ks.ok?'config ready':'not ready')+(ks.err?(' — '+aoEsc(ks.err)):'');
       }
       var pf=document.getElementById('ao-profiles');
       if(pf){
         var list=(d.profiles&&d.profiles.profiles)||[];
-        pf.textContent=list.length?list.map(function(p){return (p.id||'')+' <'+(p.from_email||'')+'>';}).join(' · '):'No profiles';
+        pf.textContent=list.length?('Profiles: '+list.map(function(p){return (p.id||'')+' <'+(p.from_email||'')+'>';}).join(' · ')):'No profiles';
       }
       var wu=document.getElementById('ao-warmup');
       if(wu){
         var w=d.kumomta&&d.kumomta.warmup?d.kumomta.warmup:{};
         var plan=w.plan||{}; var rem=w.remaining||{}; var today=w.today||{};
-        wu.textContent=(w.global_enabled?'ENABLED':'DISABLED')+' · state '+(plan.state||'?')+' · daily left '+(rem.daily!=null?rem.daily:'—')+' · accepted today '+(today.accepted!=null?today.accepted:'—')+(w.metrics&&w.metrics.reason?(' · '+w.metrics.reason):'');
+        wu.textContent='Warm-up '+(w.global_enabled?'ENABLED':'DISABLED')+' · state '+(plan.state||'?')+' · daily left '+(rem.daily!=null?rem.daily:'—')+' · accepted today '+(today.accepted!=null?today.accepted:'—')+(w.metrics&&w.metrics.reason?(' · '+w.metrics.reason):'');
       }
       var qt=document.getElementById('ao-queues');
       if(qt){
-        var lanes=d.queues||{};
         var order=['api','smtp','kumomta'];
         qt.innerHTML=order.map(function(k){
           var L=lanes[k]||{}; var prog=L.progress||{};
-          return '<tr><td>'+aoEsc(L.method_label||k)+'</td><td>'+((L.valid&&L.valid.count)||0)+'</td><td>'+((L.done&&L.done.count)||0)+'</td><td>'+(L.pending_approx||0)+'</td><td>'+aoEsc(prog.phase||'—')+'</td></tr>';
+          return '<tr><td>'+aoEsc(L.method_label||k)+'</td><td>'+((L.valid&&L.valid.count)!=null?(L.valid.count):'—')+'</td><td>'+((L.done&&L.done.count)!=null?(L.done.count):'—')+'</td><td>'+(L.pending_approx!=null?L.pending_approx:'—')+'</td><td>'+aoEsc(prog.phase||'—')+'</td></tr>';
         }).join('');
       }
       var pr=document.getElementById('ao-providers');
       if(pr){
         var rows=d.providers||[];
-        pr.textContent=rows.length?rows.map(function(r){return (r.provider||'?')+': '+(r.accepted||0);}).join(' · '):'No Kumo provider accepts recorded today';
+        pr.textContent=rows.length?rows.map(function(r){return (r.provider||'?')+': '+(r.accepted||0)+' accepted';}).join(' · '):'No Kumo provider accepts recorded today';
       }
       var cn=document.getElementById('ao-compare-note');
       if(cn) cn.textContent=(d.comparison&&d.comparison.disclaimer)||'';
+      var cards=document.getElementById('ao-compare-cards');
+      if(cards){
+        var methods=(d.comparison&&d.comparison.methods)||[];
+        cards.innerHTML=methods.map(function(m){
+          var val=(m.primary_value!=null)?m.primary_value:'Unavailable';
+          return '<div class="ops-panel" data-ao-method="'+aoEsc(m.method)+'"><h4>'+aoEsc(m.label)+'</h4>'+
+            '<div class="ops-kpi" style="margin:0;border:0;padding:0"><b>'+aoEsc(val)+'</b><span>'+aoEsc(m.primary_metric)+'</span><em>'+aoEsc(m.vocabulary||'')+'</em></div></div>';
+        }).join('');
+      }
       var ct=document.getElementById('ao-compare');
       if(ct){
-        var methods=(d.comparison&&d.comparison.methods)||[];
-        ct.innerHTML=methods.map(function(m){
-          return '<tr><td>'+aoEsc(m.label)+'</td><td>'+aoEsc(m.primary_metric)+'</td><td>'+(m.primary_value!=null?m.primary_value:'—')+'</td><td>'+aoEsc(m.vocabulary)+'</td></tr>';
+        var methods2=(d.comparison&&d.comparison.methods)||[];
+        ct.innerHTML=methods2.map(function(m){
+          return '<tr><td>'+aoEsc(m.label)+'</td><td>'+aoEsc(m.primary_metric)+'</td><td>'+(m.primary_value!=null?m.primary_value:'Unavailable')+'</td><td>'+aoEsc(m.vocabulary)+'</td></tr>';
         }).join('');
       }
       var th=document.getElementById('ao-throughput');
       if(th){
-        var t=d.throughput||{};
-        th.textContent='Avg accepted/day '+(t.avg_accepted_per_day!=null?t.avg_accepted_per_day:'—')+' · peak '+(t.peak_accepted!=null?t.peak_accepted:'—')+(t.note?(' — '+t.note):'');
+        th.textContent='Avg accepted/day '+(thr.avg_accepted_per_day!=null?thr.avg_accepted_per_day:'Unavailable')+' · peak '+(thr.peak_accepted!=null?thr.peak_accepted:'Unavailable')+(thr.note?(' — '+thr.note):'');
       }
-      if(msg) msg.textContent='Overview updated '+((d.generated_at)||'');
-    }).catch(function(){ if(msg) msg.textContent='Overview request failed'; });
+      var spark=document.getElementById('ao-spark');
+      if(spark){
+        if(!series.length){ spark.innerHTML='<div class="ops-empty" style="padding:12px 0">No throughput series</div>'; }
+        else {
+          var max=1;
+          for(var i=0;i<series.length;i++){ if(Number(series[i].accepted)>max) max=Number(series[i].accepted); }
+          spark.innerHTML=series.map(function(day){
+            var a=Number(day.accepted)||0;
+            var h=Math.max(4, Math.round((a/max)*64));
+            return '<i title="'+aoEsc((day.day||'')+': '+a)+'" style="height:'+h+'px"></i>';
+          }).join('');
+        }
+      }
+      var su=document.getElementById('ao-suppressions');
+      if(su){
+        if(!supAvail) su.textContent='Suppression counts Unavailable';
+        else {
+          var parts=['Total '+sc.total];
+          Object.keys(sc).forEach(function(k){ if(k!=='total' && sc[k]!=null) parts.push(k+': '+sc[k]); });
+          su.textContent=parts.join(' · ');
+        }
+      }
+      aoApplyMethodFilter();
+      if(msg){ msg.className='ops-toast ok'; msg.textContent='Overview updated '+(d.generated_at||''); }
+    }).catch(function(){ if(msg){ msg.className='ops-toast fail'; msg.textContent='Overview request failed'; } });
   };
-  function loadAoLogs(){
-    var src=document.getElementById('ao-log-source');
-    var q=document.getElementById('ao-log-q');
-    var tb=document.getElementById('ao-logs');
-    var url='analytics_overview_api.php?action=logs&source='+encodeURIComponent(src?src.value:'kumomta')+'&q='+encodeURIComponent(q?q.value:'')+'&limit=80';
-    if(tb) tb.innerHTML='<tr><td>Loading…</td></tr>';
-    fetch(url,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
-      if(!tb) return;
-      var rows=(d&&d.rows)||[];
-      if(!rows.length){ tb.innerHTML='<tr><td style="color:#8b9bb0">'+(d&&d.exists===false?'Log file missing':'No matches')+'</td></tr>'; return; }
-      tb.innerHTML=rows.map(function(r){ return '<tr><td style="font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap">'+aoEsc(r.line||'')+'</td></tr>'; }).join('');
-    }).catch(function(){ if(tb) tb.innerHTML='<tr><td>Log request failed</td></tr>'; });
-  }
+  function loadAoLogs(){ if(typeof showPage==='function') showPage('logs'); }
   var btnAo=document.getElementById('btn-ao-refresh');
   if(btnAo) btnAo.onclick=function(){ window.loadAnalyticsOverview(); };
   var btnAoL=document.getElementById('btn-ao-logs');
   if(btnAoL) btnAoL.onclick=loadAoLogs;
-  var btnAoW=document.getElementById('btn-ao-goto-warmup');
-  if(btnAoW) btnAoW.onclick=function(){ if(typeof showPage==='function') showPage('warmup'); };
+  function aoGoto(name){ if(typeof showPage==='function') showPage(name); else if(typeof window.showAppPage==='function') window.showAppPage(name); }
+  ['btn-ao-goto-warmup','btn-ao-goto-warmup-2'].forEach(function(id){ var b=document.getElementById(id); if(b) b.onclick=function(){ aoGoto('warmup'); }; });
+  ['btn-ao-goto-logs','btn-ao-goto-logs-2'].forEach(function(id){ var b=document.getElementById(id); if(b) b.onclick=function(){ aoGoto('logs'); }; });
+  var aoDays=document.getElementById('ao-days'); if(aoDays) aoDays.onchange=function(){ window.loadAnalyticsOverview(); };
+  var aoCountry=document.getElementById('ao-country'); if(aoCountry) aoCountry.onchange=function(){ window.loadAnalyticsOverview(); };
+  var aoMethod=document.getElementById('ao-method'); if(aoMethod) aoMethod.onchange=aoApplyMethodFilter;
   if(document.getElementById('analytics-overview-card')) window.loadAnalyticsOverview();
 
   // —— SendGridMail multi-country delivered export ——
@@ -1193,61 +1343,147 @@ document.addEventListener('DOMContentLoaded', function(){
   var sgmQ=document.getElementById('sgm-q');
   if(sgmQ) sgmQ.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ window.__sgmPage=1; window.loadSendGridMail(); } });
 
-  // —— Warm-up (Phase 4) ——
+  // —— Warm-up (Phase 4 UI clarity + hourly UX) ——
+  window.__wuLast=null;
   function wuEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function wuSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
-  function loadWarmup(){
+  function wuToast(text, kind){
     var msg=document.getElementById('wu-msg');
-    var box=document.getElementById('warmup-status-box');
+    if(!msg) return;
+    msg.className='ops-toast'+(kind?(' '+kind):'');
+    msg.textContent=text||'';
+  }
+  function wuChip(id, label, mode){
+    var el=document.getElementById(id);
+    if(!el) return;
+    el.className='ops-chip'+(mode?(' '+mode):'');
+    el.innerHTML='<i></i> '+wuEsc(label);
+  }
+  function wuBar(barId, fillId, used, cap){
+    var bar=document.getElementById(barId);
+    var fill=document.getElementById(fillId);
+    var pct=0;
+    cap=Number(cap)||0; used=Number(used)||0;
+    if(cap>0) pct=Math.max(0, Math.min(100, Math.round((used/cap)*100)));
+    if(fill) fill.style.width=pct+'%';
+    if(bar){
+      bar.className='ops-bar';
+      if(pct>=100) bar.className='ops-bar full';
+      else if(pct>=80) bar.className='ops-bar warn';
+    }
+    return pct;
+  }
+  function wuDisplayMath(p, pace, rolling){
+    var minSec=Number((p&&p.min_interval_seconds!=null)?p.min_interval_seconds:(pace&&pace.min_interval_seconds!=null?pace.min_interval_seconds:180))||0;
+    var hourly=Number((p&&p.hourly_cap!=null)?p.hourly_cap:20)||0;
+    var pacingRate=(minSec>0)?(Math.round((3600/minSec)*100)/100):null;
+    var eff=(pacingRate==null)?hourly:Math.min(hourly, pacingRate);
+    return {minSec:minSec, hourly:hourly, pacingRate:pacingRate, eff:eff, rolling:Number(rolling)||0};
+  }
+  function loadWarmup(opts){
+    opts=opts||{};
     fetch('warmup_api.php?action=status&method=kumomta',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
-      if(!d||!d.ok){ if(box) box.textContent='Warm-up status failed'; return; }
+      if(!d||!d.ok){ wuToast('Warm-up status failed','fail'); return; }
+      window.__wuLast=d;
       var p=d.plan||{};
       var rem=d.remaining||{};
       var day=d.today||{};
-      if(box){
-        box.textContent=(d.global_enabled?'ENABLED':'DISABLED')+' · plan '+(p.enabled?'on':'off')+' · daily cap '+(p.current_daily_cap||0)+' · hourly '+(p.hourly_cap||0)+(d.emergency_stop?' · EMERGENCY STOP FLAG':'')+(d.metrics&&d.metrics.reason?(' · '+d.metrics.reason):'');
-      }
+      var c=d.counters||{};
+      var pace=d.pacing||{};
+      var math=wuDisplayMath(p, pace, d.rolling_60m_attempts);
+      var st=String(p.state||'—');
       wuSet('wu-daily-left', rem.daily);
       wuSet('wu-hourly-left', rem.hourly);
-      wuSet('wu-accepted', day.accepted);
-      wuSet('wu-state', p.state);
-      var c=d.counters||{};
+      wuSet('wu-accepted', day.accepted!=null?day.accepted:c.accepted_today);
+      wuSet('wu-state', st);
       wuSet('wu-sent', c.sent_attempts_today);
       wuSet('wu-bounced', c.bounced_today);
       wuSet('wu-failed', c.failed_today);
-      var pace=d.pacing||{};
-      wuSet('wu-rate', pace.target_per_hour!=null?pace.target_per_hour:(p.hourly_cap||20));
+      wuSet('wu-cfg-hourly', math.hourly);
+      wuSet('wu-pace-rate', math.pacingRate!=null?math.pacingRate:'Unavailable');
+      wuSet('wu-eff-throughput', math.eff);
+      wuSet('wu-daily-cap-lbl', 'cap '+(p.current_daily_cap!=null?p.current_daily_cap:'—'));
+      wuSet('wu-hourly-cap-lbl', 'configured '+math.hourly);
+      wuSet('wu-min-interval-lbl', 'min interval '+math.minSec+'s');
+      var kpiState=document.getElementById('wu-kpi-state');
+      if(kpiState){
+        kpiState.className='ops-kpi'+(st==='active'?' ok':(st==='paused'||st==='hold'?' warn':' fail'));
+      }
+      wuChip('wu-chip-state', 'State '+st, st==='active'?'on':(st==='paused'||st==='hold'?'warn':'bad'));
+      wuChip('wu-chip-gov', 'Governor '+(d.global_enabled?'ENABLED':'DISABLED'), d.global_enabled?'on':'bad');
+      wuChip('wu-chip-emerg', 'Emergency '+(d.emergency_stop?'ACTIVE':'clear'), d.emergency_stop?'bad':'on');
+      wuChip('wu-chip-manual', 'Manual approval '+(p.require_manual_increase?'ON':'OFF'), p.require_manual_increase?'warn':'on');
+
+      var dailyCap=Number(p.current_daily_cap)||0;
+      var accepted=Number(day.accepted!=null?day.accepted:c.accepted_today)||0;
+      wuBar('wu-daily-bar','wu-daily-bar-fill', accepted, dailyCap);
+      wuSet('wu-daily-bar-lbl', accepted+' / '+dailyCap);
+      wuBar('wu-hourly-bar','wu-hourly-bar-fill', math.rolling, math.hourly);
+      wuSet('wu-hourly-bar-lbl', math.rolling+' / '+math.hourly);
+
+      var paceWarn=document.getElementById('wu-pace-warn');
+      if(paceWarn){
+        if(math.pacingRate!=null && math.hourly>math.pacingRate){
+          paceWarn.style.display='block';
+          paceWarn.textContent='Pacing is the limiting factor: configured hourly cap is '+math.hourly+'/hr but min interval '+math.minSec+'s caps effective throughput at ~'+math.eff+'/hr (display only — enforcement unchanged).';
+        } else {
+          paceWarn.style.display='none';
+          paceWarn.textContent='';
+        }
+      }
+      var capWarn=document.getElementById('wu-cap-warn');
+      if(capWarn){
+        var bits=[];
+        if(rem.daily!=null && Number(rem.daily)<1) bits.push('Daily capacity exhausted.');
+        if(rem.hourly!=null && Number(rem.hourly)<1) bits.push('Rolling 60-minute attempt cap exhausted.');
+        if(d.emergency_stop) bits.push('Emergency stop flag is active.');
+        if(st!=='active') bits.push('Plan state is '+st+' — campaign Kumo sends are halted by the governor.');
+        if(bits.length){ capWarn.style.display='block'; capWarn.textContent=bits.join(' '); }
+        else { capWarn.style.display='none'; capWarn.textContent=''; }
+      }
+      var metWarn=document.getElementById('wu-metrics-warn');
+      if(metWarn){
+        if(d.metrics && d.metrics.ok===false && d.metrics.reason){
+          metWarn.style.display='block';
+          metWarn.textContent='Metric gate: '+d.metrics.reason;
+        } else { metWarn.style.display='none'; metWarn.textContent=''; }
+      }
+
       var paceBox=document.getElementById('wu-pace-box');
       if(paceBox){
-        paceBox.textContent='Pacing min '+((p.min_interval_seconds!=null)?p.min_interval_seconds:(pace.min_interval_seconds||180))+'s · next_send_at '+(pace.next_send_at||'—')+' · retry_after '+(pace.retry_after_seconds!=null?pace.retry_after_seconds:0)+'s · rolling 60m attempts '+(d.rolling_60m_attempts!=null?d.rolling_60m_attempts:0)+'/'+(p.hourly_cap||20);
+        paceBox.innerHTML='<b>Pacing</b> · min '+math.minSec+'s · next_send_at '+(pace.next_send_at||'—')+' · retry_after '+(pace.retry_after_seconds!=null?pace.retry_after_seconds:0)+'s · rolling 60m <b>'+math.rolling+'/'+math.hourly+'</b> · effective throughput <b>'+math.eff+'/hr</b>';
       }
+      var ro=document.getElementById('wu-readonly-pace');
+      if(ro) ro.innerHTML='Min interval (read-only from <code>WARMUP_MIN_INTERVAL_SECONDS</code>): <b>'+math.minSec+'s</b> → pacing ≈ <b>'+(math.pacingRate!=null?math.pacingRate:'—')+'/hr</b>. Effective throughput = min(hourly cap, pacing) = <b>'+math.eff+'/hr</b>.';
       var qBox=document.getElementById('wu-queue-box');
       if(qBox){
         var q=d.queue||{};
         qBox.textContent=(q.note||'Queue: open Recipients → KumoMTA')+(d.vps_readiness&&d.vps_readiness.note?(' · '+d.vps_readiness.note):'');
       }
-      var dc=document.getElementById('wu-daily-cap'); if(dc) dc.value=p.current_daily_cap||50;
-      var hc=document.getElementById('wu-hourly-cap'); if(hc) hc.value=p.hourly_cap||20;
+      if(!opts.keepInputs){
+        var dc=document.getElementById('wu-daily-cap'); if(dc) dc.value=p.current_daily_cap||50;
+        var hc=document.getElementById('wu-hourly-cap'); if(hc) hc.value=p.hourly_cap||20;
+      }
       var pend=document.getElementById('wu-pending');
       if(pend){
         var rows=d.pending_increases||[];
-        if(!rows.length) pend.textContent='None';
+        if(!rows.length) pend.textContent='None — no pending increase requests.';
         else pend.innerHTML=rows.map(function(r){
-          return '#'+r.id+' → daily '+r.requested_daily_cap+' / hourly '+r.requested_hourly_cap+' — '+wuEsc(r.reason||'')+
-            ' <button type="button" class="sd-btn wu-approve" data-id="'+r.id+'">Approve</button>'+
-            ' <button type="button" class="sd-btn wu-reject" data-id="'+r.id+'">Reject</button>';
-        }).join('<br>');
+          return '<div style="margin:0 0 8px">#'+wuEsc(r.id)+' · requested daily <b>'+wuEsc(r.requested_daily_cap)+'</b> / hourly <b>'+wuEsc(r.requested_hourly_cap)+'</b> — '+wuEsc(r.reason||'')+
+            ' <button type="button" class="ops-btn primary wu-approve" data-id="'+wuEsc(r.id)+'">Approve</button>'+
+            ' <button type="button" class="ops-btn wu-reject" data-id="'+wuEsc(r.id)+'">Reject</button></div>';
+        }).join('');
       }
       var tb=document.getElementById('wu-decisions');
       if(tb){
         var dec=d.decisions||[];
-        if(!dec.length) tb.innerHTML='<tr><td colspan="4" style="color:#8b9bb0">No decisions yet.</td></tr>';
+        if(!dec.length) tb.innerHTML='<tr><td colspan="4" style="color:#767d88">No decisions yet.</td></tr>';
         else tb.innerHTML=dec.map(function(x){
           return '<tr><td>'+wuEsc(x.created_at)+'</td><td>'+wuEsc(x.action)+'</td><td>'+wuEsc(x.reason)+'</td><td>'+wuEsc(x.actor)+'</td></tr>';
         }).join('');
       }
-      if(msg) msg.textContent='Updated';
-    }).catch(function(){ if(box) box.textContent='Warm-up request failed'; });
+      if(!opts.silentToast) wuToast('Status refreshed','ok');
+    }).catch(function(){ wuToast('Warm-up request failed','fail'); });
   }
   function wuPost(action, fields){
     var fd=new FormData();
@@ -1256,35 +1492,197 @@ document.addEventListener('DOMContentLoaded', function(){
     if(fields){ Object.keys(fields).forEach(function(k){ fd.append(k, fields[k]); }); }
     return fetch('warmup_api.php',{method:'POST',body:fd,cache:'no-store'}).then(function(r){return r.json();});
   }
-  var btnWuR=document.getElementById('btn-wu-refresh');
-  if(btnWuR) btnWuR.onclick=loadWarmup;
-  var btnWuSave=document.getElementById('btn-wu-save-caps');
-  if(btnWuSave) btnWuSave.onclick=function(){
+  function wuHandleCapResponse(d, requested){
+    if(!d||d.ok===false){
+      wuToast((d&&d.err)?d.err:'Save failed','fail');
+      loadWarmup({silentToast:true});
+      return;
+    }
+    var reqD=requested&&requested.daily!=null?requested.daily:null;
+    var reqH=requested&&requested.hourly!=null?requested.hourly:null;
+    var st=d.status||{};
+    var plan=(st.plan)||(d.plan)||{};
+    var persistedD=plan.current_daily_cap;
+    var persistedH=plan.hourly_cap;
+    if(d.unchanged){
+      wuToast('No actual change — daily '+persistedD+', hourly '+persistedH+' unchanged.','warn');
+    } else if(d.pending){
+      wuToast('Pending approval — requested daily '+(reqD!=null?reqD:'?')+' / hourly '+(reqH!=null?reqH:'?')+'. Persisted caps remain daily '+persistedD+', hourly '+persistedH+'. Not applied yet.','warn');
+    } else if(d.applied){
+      wuToast('Applied successfully — daily '+persistedD+', hourly '+persistedH+'.','ok');
+    } else {
+      wuToast('Saved — daily '+persistedD+', hourly '+persistedH+(d.pending?' (check pending)':''),'ok');
+    }
+    loadWarmup({silentToast:true});
+  }
+  function wuReadCaps(){
     var d=document.getElementById('wu-daily-cap');
     var h=document.getElementById('wu-hourly-cap');
-    wuPost('update',{current_daily_cap:d?d.value:50, hourly_cap:h?h.value:20, reason:'Dashboard cap change'}).then(function(){ loadWarmup(); });
+    return {daily:d?d.value:50, hourly:h?h.value:20};
+  }
+  var btnWuR=document.getElementById('btn-wu-refresh');
+  if(btnWuR) btnWuR.onclick=function(){ loadWarmup(); };
+  var btnWuSave=document.getElementById('btn-wu-save-caps');
+  if(btnWuSave) btnWuSave.onclick=function(){
+    var caps=wuReadCaps();
+    var last=window.__wuLast&&window.__wuLast.plan?window.__wuLast.plan:{};
+    if(String(caps.daily)===String(last.current_daily_cap) && String(caps.hourly)===String(last.hourly_cap)){
+      wuToast('No actual change.','warn');
+      return;
+    }
+    wuToast('Saving…');
+    wuPost('update',{current_daily_cap:caps.daily, hourly_cap:caps.hourly, reason:'Dashboard cap change'}).then(function(d){ wuHandleCapResponse(d, caps); });
   };
-  function wuState(st){ wuPost('set_state',{state:st, reason:'Dashboard → '+st}).then(function(){ loadWarmup(); }); }
+  var btnWuHourly=document.getElementById('btn-wu-apply-hourly');
+  if(btnWuHourly) btnWuHourly.onclick=function(){
+    var caps=wuReadCaps();
+    var last=window.__wuLast&&window.__wuLast.plan?window.__wuLast.plan:{};
+    if(String(caps.hourly)===String(last.hourly_cap)){
+      wuToast('No actual change to hourly cap.','warn');
+      return;
+    }
+    // Hourly-only: omit current_daily_cap so backend keeps persisted daily (no silent daily modify).
+    wuToast('Applying hourly…');
+    wuPost('update',{hourly_cap:caps.hourly, reason:'Dashboard hourly-only apply'}).then(function(d){
+      wuHandleCapResponse(d, {daily:last.current_daily_cap, hourly:caps.hourly});
+    });
+  };
+  var btnWuDaily=document.getElementById('btn-wu-request-daily');
+  if(btnWuDaily) btnWuDaily.onclick=function(){
+    var caps=wuReadCaps();
+    var last=window.__wuLast&&window.__wuLast.plan?window.__wuLast.plan:{};
+    var curD=Number(last.current_daily_cap)||0;
+    var newD=Number(caps.daily)||0;
+    if(newD<=curD){
+      wuToast('Request daily increase needs a daily value higher than the persisted cap ('+curD+').','warn');
+      return;
+    }
+    wuToast('Requesting daily increase…');
+    wuPost('update',{current_daily_cap:caps.daily, hourly_cap:caps.hourly, reason:'Dashboard daily increase request'}).then(function(d){
+      wuHandleCapResponse(d, caps);
+    });
+  };
+  function wuState(st){ wuPost('set_state',{state:st, reason:'Dashboard → '+st}).then(function(){ wuToast('State → '+st,'ok'); loadWarmup({silentToast:true}); }); }
   var bA=document.getElementById('btn-wu-active'); if(bA) bA.onclick=function(){ wuState('active'); };
   var bP=document.getElementById('btn-wu-pause'); if(bP) bP.onclick=function(){ wuState('paused'); };
   var bH=document.getElementById('btn-wu-hold'); if(bH) bH.onclick=function(){ wuState('hold'); };
   var bS=document.getElementById('btn-wu-stop'); if(bS) bS.onclick=function(){ wuState('stopped'); };
-  var bE=document.getElementById('btn-wu-emerg'); if(bE) bE.onclick=function(){ wuPost('emergency_stop',{}).then(function(){ loadWarmup(); }); };
-  var bC=document.getElementById('btn-wu-clear-emerg'); if(bC) bC.onclick=function(){ wuPost('clear_emergency',{}).then(function(){ loadWarmup(); }); };
+  var bE=document.getElementById('btn-wu-emerg'); if(bE) bE.onclick=function(){ wuPost('emergency_stop',{}).then(function(){ wuToast('Emergency stop set','fail'); loadWarmup({silentToast:true}); }); };
+  var bC=document.getElementById('btn-wu-clear-emerg'); if(bC) bC.onclick=function(){ wuPost('clear_emergency',{}).then(function(){ wuToast('Emergency flag cleared','ok'); loadWarmup({silentToast:true}); }); };
   document.addEventListener('click', function(ev){
     var t=ev.target; if(!t||!t.classList) return;
     if(t.classList.contains('wu-approve')){
       wuPost('approve_increase',{pending_id:t.getAttribute('data-id')}).then(function(d){
-        var msg=document.getElementById('wu-msg');
-        if(msg) msg.textContent=d&&d.ok?'Approved':(d&&d.err?d.err:'Approve failed');
-        loadWarmup();
+        if(d&&d.ok) wuToast('Approved — caps applied.','ok');
+        else wuToast((d&&d.err)?d.err:'Approve failed','fail');
+        loadWarmup({silentToast:true});
       });
     }
     if(t.classList.contains('wu-reject')){
-      wuPost('reject_increase',{pending_id:t.getAttribute('data-id'), detail:'UI reject'}).then(function(){ loadWarmup(); });
+      wuPost('reject_increase',{pending_id:t.getAttribute('data-id'), detail:'UI reject'}).then(function(d){
+        wuToast(d&&d.ok?'Rejected.':'Reject failed', d&&d.ok?'warn':'fail');
+        loadWarmup({silentToast:true});
+      });
     }
   });
-  if(document.getElementById('warmup-card')) loadWarmup();
+  if(document.getElementById('warmup-card')) loadWarmup({silentToast:true});
+
+  // —— Dashboard Logs (read-only, redacted) ——
+  window.__logsPage=1;
+  function logsEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function logsFillCountry(){
+    var sel=document.getElementById('logs-country');
+    if(!sel) return;
+    var cur=sel.value;
+    var codes=[];
+    try{ if(typeof countryState!=='undefined' && countryState.list) codes=Object.keys(countryState.list); }catch(e){}
+    var html='<option value="">Country (any)</option>';
+    for(var i=0;i<codes.length;i++){
+      var c=codes[i];
+      var name=(countryState.list[c]&&countryState.list[c].name)?countryState.list[c].name:c;
+      html+='<option value="'+logsEsc(c)+'">'+logsEsc(String(c).toUpperCase()+' — '+name)+'</option>';
+    }
+    sel.innerHTML=html;
+    if(cur) sel.value=cur;
+  }
+  window.loadDashboardLogs=function(){
+    logsFillCountry();
+    var msg=document.getElementById('logs-msg');
+    var body=document.getElementById('logs-body');
+    var note=document.getElementById('logs-note');
+    var src=document.getElementById('logs-source');
+    var sev=document.getElementById('logs-severity');
+    var q=document.getElementById('logs-q');
+    var cc=document.getElementById('logs-country');
+    if(body) body.innerHTML='<tr><td colspan="9" class="ops-empty">Loading…</td></tr>';
+    if(msg){ msg.className='ops-toast'; msg.textContent='Loading logs…'; }
+    var url='dashboard_logs_api.php?action=list'
+      +'&source='+encodeURIComponent(src?src.value:'all')
+      +'&severity='+encodeURIComponent(sev&&sev.value!=='all'?sev.value:'')
+      +'&q='+encodeURIComponent(q?q.value:'')
+      +'&country='+encodeURIComponent(cc?cc.value:'')
+      +'&page='+encodeURIComponent(window.__logsPage||1)
+      +'&per_page=40';
+    fetch(url,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){
+        if(body) body.innerHTML='<tr><td colspan="9" class="ops-empty">Failed to load logs</td></tr>';
+        if(msg){ msg.className='ops-toast fail'; msg.textContent=(d&&d.err)?d.err:'Logs request failed'; }
+        return;
+      }
+      if(note) note.textContent=d.note||'Read-only persistent sources.';
+      var rows=d.rows||[];
+      if(!rows.length){
+        if(body) body.innerHTML='<tr><td colspan="9" class="ops-empty">No events for this filter.</td></tr>';
+      } else if(body){
+        body.innerHTML=rows.map(function(r, idx){
+          var det=String(r.details||'');
+          var short=det.length>120?(det.slice(0,120)+'…'):det;
+          return '<tr class="expandable" data-logs-idx="'+idx+'">'
+            +'<td>'+logsEsc(r.ts||'—')+'</td>'
+            +'<td>'+logsEsc(r.severity||'—')+'</td>'
+            +'<td>'+logsEsc(r.source||'—')+'</td>'
+            +'<td>'+logsEsc(r.event_type||'—')+'</td>'
+            +'<td>'+logsEsc(r.country||'—')+'</td>'
+            +'<td>'+logsEsc(r.mailer||'—')+'</td>'
+            +'<td>'+logsEsc(r.server||'—')+'</td>'
+            +'<td>'+logsEsc(r.campaign||'—')+'</td>'
+            +'<td title="Click row to expand">'+logsEsc(short)+'</td>'
+            +'</tr>'
+            +'<tr class="detail-row" id="logs-detail-'+idx+'" style="display:none"><td colspan="9">'+logsEsc(det)+'</td></tr>';
+        }).join('');
+        window.__logsRows=rows;
+      }
+      var lbl=document.getElementById('logs-page-lbl');
+      if(lbl) lbl.textContent='Page '+(d.page||1)+' / '+(d.pages||1)+' · '+((d.total!=null)?d.total:0)+' events';
+      window.__logsPages=d.pages||1;
+      window.__logsPage=d.page||1;
+      if(msg){ msg.className='ops-toast ok'; msg.textContent='Logs updated'; }
+    }).catch(function(){
+      if(body) body.innerHTML='<tr><td colspan="9" class="ops-empty">Logs request failed</td></tr>';
+      if(msg){ msg.className='ops-toast fail'; msg.textContent='Logs request failed'; }
+    });
+  };
+  var btnLogs=document.getElementById('btn-logs-refresh');
+  if(btnLogs) btnLogs.onclick=function(){ window.__logsPage=1; window.loadDashboardLogs(); };
+  var btnLogsPrev=document.getElementById('btn-logs-prev');
+  if(btnLogsPrev) btnLogsPrev.onclick=function(){ if(window.__logsPage>1){ window.__logsPage--; window.loadDashboardLogs(); } };
+  var btnLogsNext=document.getElementById('btn-logs-next');
+  if(btnLogsNext) btnLogsNext.onclick=function(){ if(window.__logsPage<(window.__logsPages||1)){ window.__logsPage++; window.loadDashboardLogs(); } };
+  var logsQ=document.getElementById('logs-q');
+  if(logsQ) logsQ.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ window.__logsPage=1; window.loadDashboardLogs(); } });
+  ['logs-source','logs-severity','logs-country'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.onchange=function(){ window.__logsPage=1; window.loadDashboardLogs(); };
+  });
+  document.addEventListener('click', function(ev){
+    var t=ev.target;
+    while(t && t!==document && !(t.tagName==='TR' && t.classList && t.classList.contains('expandable'))) t=t.parentNode;
+    if(!t || !t.getAttribute) return;
+    var idx=t.getAttribute('data-logs-idx');
+    if(idx==null) return;
+    var det=document.getElementById('logs-detail-'+idx);
+    if(det) det.style.display=(det.style.display==='none')?'':'none';
+  });
 
   // —— Global suppressions (Phase 3) ——
   window.__suppPage=1;
@@ -1496,8 +1894,9 @@ document.addEventListener('DOMContentLoaded', function(){
     recipients:{title:'Recipients', sub:'The highlighted list is the one Send uses'},
     compose:{title:'Compose', sub:'Write the email, set pace, then send'},
     analytics:{title:'Analytics', sub:'Methods overview · Accepted ≠ Delivered · SendGrid sync · suppressions'},
-    sendgridmail:{title:'SendGridMail', sub:'Multi-country · verified delivered only · VPS TXT export'},
-    warmup:{title:'Warm-up', sub:'KumoMTA caps, states, and manual increase approval'}
+    warmup:{title:'Warm-up', sub:'Capacity · pacing · effective throughput · manual approval'},
+    logs:{title:'Logs', sub:'Read-only event viewer · secrets redacted · persistent sources only'},
+    sendgridmail:{title:'SendGridMail', sub:'Multi-country · verified delivered only · VPS TXT export'}
   };
   // Map old empty pages → dense ones
   var PAGE_ALIAS={mode:'setup', connections:'setup', message:'compose', send:'compose'};
@@ -1527,6 +1926,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if(name==='analytics' && typeof window.loadAnalyticsOverview==='function') window.loadAnalyticsOverview();
     if(name==='sendgridmail' && typeof window.loadSendGridMail==='function') window.loadSendGridMail();
     if(name==='warmup' && typeof loadWarmup==='function') loadWarmup();
+    if(name==='logs' && typeof window.loadDashboardLogs==='function') window.loadDashboardLogs();
   }
   window.showAppPage=showPage;
   var nav=document.getElementById('app-nav');
@@ -2088,77 +2488,103 @@ document.addEventListener('DOMContentLoaded', function(){
   </div>
 
   <div class="nav-page" id="page-analytics">
-  <section class="setup-card" id="analytics-overview-card">
-    <h3>Operations overview</h3>
-    <div class="hint" style="margin:0 0 10px"><b>Accepted ≠ Delivered.</b> SendGrid “delivered” (when synced) is not the same as Kumo/Normal SMTP accept/OK. Phase 2 unified message ledger was skipped — this overview reads each method’s own stores.</div>
-    <div class="ra-filters" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
-      <select id="ao-days" title="Range for SendGrid + Kumo series">
-        <option value="1">Today</option>
-        <option value="7" selected>Last 7 days</option>
-        <option value="30">Last 30 days</option>
+  <section class="ops-dash" id="analytics-overview-card">
+    <div class="ops-label">Analytics</div>
+    <h3 class="ops-title">Operations overview</h3>
+    <p class="ops-lead"><b>Accepted ≠ Delivered.</b> SendGrid “delivered” (when synced) is not Kumo/Normal SMTP accept/OK. Unavailable APIs show <b>Unavailable</b>, not zero. No unified message ledger — each method uses its own store.</p>
+
+    <div class="ops-filters">
+      <select id="ao-days" title="Date range">
+        <option value="1">1 day</option>
+        <option value="7" selected>7 days</option>
+        <option value="30">30 days</option>
       </select>
-      <button type="button" class="sd-btn" id="btn-ao-refresh">Refresh overview</button>
-      <button type="button" class="sd-btn" id="btn-ao-goto-warmup">Open Warm-up</button>
+      <select id="ao-country" title="Country (queue lanes)">
+        <option value="">Country (sidebar)</option>
+      </select>
+      <select id="ao-method" title="Sending method filter">
+        <option value="all">All methods</option>
+        <option value="sendgrid">SendGrid</option>
+        <option value="kumomta">KumoMTA</option>
+        <option value="normal_smtp">Normal SMTP</option>
+      </select>
+      <button type="button" class="ops-btn primary" id="btn-ao-refresh">Refresh</button>
+      <button type="button" class="ops-btn" id="btn-ao-goto-warmup">Warm-up</button>
+      <button type="button" class="ops-btn" id="btn-ao-goto-logs">Logs</button>
     </div>
-    <div id="ao-vocab" class="sd-note" style="margin-bottom:10px">Loading vocabulary…</div>
-    <h4 style="margin:12px 0 8px">1. Sending methods</h4>
-    <div class="sd-overview" style="grid-template-columns:repeat(3,1fr)">
-      <div class="sd-kpi"><b id="ao-sg-ready">—</b><span>SendGrid</span></div>
-      <div class="sd-kpi"><b id="ao-kumo-ready">—</b><span>KumoMTA</span></div>
-      <div class="sd-kpi"><b id="ao-socks-ok">—</b><span>SOCKS OK proxies</span></div>
+    <div id="ao-vocab" class="ops-info">Loading vocabulary…</div>
+
+    <div class="ops-sec">KPI overview</div>
+    <div class="ops-kpis" id="ao-kpi-row">
+      <div class="ops-kpi info" data-ao-method="sendgrid"><b id="ao-kpi-delivered">—</b><span>SendGrid Delivered</span><em>synced · not SMTP accept</em></div>
+      <div class="ops-kpi ok" data-ao-method="kumomta"><b id="ao-kpi-accepted">—</b><span>Kumo Accepted</span><em>SMTP accept ≠ delivered</em></div>
+      <div class="ops-kpi fail" data-ao-method="kumomta"><b id="ao-kpi-failed">—</b><span>Failed</span><em>Kumo warm-up series</em></div>
+      <div class="ops-kpi warn"><b id="ao-kpi-suppressed">—</b><span>Suppressed</span></div>
+      <div class="ops-kpi"><b id="ao-kpi-pending">—</b><span>Queue pending ≈</span><em id="ao-kpi-pending-em">selected country</em></div>
     </div>
-    <div id="ao-methods-detail" class="hint" style="margin-top:8px"></div>
 
-    <h4 style="margin:16px 0 8px">2. KumoMTA status</h4>
-    <div id="ao-kumo-box" class="sd-note">Loading…</div>
+    <div class="ops-sec">Sending method comparison</div>
+    <div id="ao-compare-note" class="ops-info" style="margin-bottom:10px"></div>
+    <div class="ops-compare" id="ao-compare-cards"></div>
+    <div class="ops-info" id="ao-methods-detail"></div>
 
-    <h4 style="margin:16px 0 8px">3. Sender profiles</h4>
-    <div id="ao-profiles" class="sd-note">Loading…</div>
+    <div class="ops-grid">
+      <div class="ops-panel" data-ao-method="kumomta">
+        <h4>Kumo throughput (warm-up series)</h4>
+        <div class="ops-spark" id="ao-spark" aria-hidden="true"></div>
+        <div id="ao-throughput" class="ops-info">Loading…</div>
+      </div>
+      <div class="ops-panel">
+        <h4>Suppressions</h4>
+        <div id="ao-suppressions" class="ops-info">Loading…</div>
+        <h4 style="margin-top:14px">Provider split (Kumo today)</h4>
+        <div id="ao-providers" class="ops-info">Loading…</div>
+      </div>
+    </div>
 
-    <h4 style="margin:16px 0 8px">4. Warm-up summary</h4>
-    <div id="ao-warmup" class="sd-note">Loading…</div>
-
-    <h4 style="margin:16px 0 8px">5. Campaign / queue lanes</h4>
-    <div class="ra-table-wrap">
-      <table class="ra-table">
+    <div class="ops-sec">Country queue lanes</div>
+    <div class="ops-table-wrap">
+      <table class="ops-table">
         <thead><tr><th>Lane</th><th>Valid</th><th>Done</th><th>Pending≈</th><th>Last progress</th></tr></thead>
-        <tbody id="ao-queues"><tr><td colspan="5" style="color:#8b9bb0">Refresh overview…</td></tr></tbody>
+        <tbody id="ao-queues"><tr><td colspan="5" style="color:#767d88">Refresh overview…</td></tr></tbody>
       </table>
     </div>
 
-    <h4 style="margin:16px 0 8px">6. Provider split (Kumo today)</h4>
-    <div id="ao-providers" class="sd-note">Loading…</div>
-
-    <h4 style="margin:16px 0 8px">7. Method comparison</h4>
-    <div id="ao-compare-note" class="hint" style="margin:0 0 8px"></div>
-    <div class="ra-table-wrap">
-      <table class="ra-table">
-        <thead><tr><th>Method</th><th>Primary metric</th><th>Value</th><th>Vocabulary</th></tr></thead>
-        <tbody id="ao-compare"><tr><td colspan="4" style="color:#8b9bb0">Refresh overview…</td></tr></tbody>
-      </table>
+    <div class="ops-sec">Status &amp; links</div>
+    <div class="ops-grid">
+      <div class="ops-panel">
+        <h4>Readiness</h4>
+        <div class="ops-kpis" style="grid-template-columns:repeat(3,1fr);margin:0">
+          <div class="ops-kpi" data-ao-method="sendgrid"><b id="ao-sg-ready">—</b><span>SendGrid</span></div>
+          <div class="ops-kpi" data-ao-method="kumomta"><b id="ao-kumo-ready">—</b><span>KumoMTA</span></div>
+          <div class="ops-kpi" data-ao-method="normal_smtp"><b id="ao-socks-ok">—</b><span>SOCKS OK</span></div>
+        </div>
+        <div id="ao-kumo-box" class="ops-info" style="margin-top:10px">Loading…</div>
+        <div id="ao-warmup" class="ops-info">Loading…</div>
+        <div id="ao-profiles" class="ops-info">Loading…</div>
+      </div>
+      <div class="ops-panel">
+        <h4>Open</h4>
+        <div class="ops-actions">
+          <button type="button" class="ops-btn primary" id="btn-ao-goto-warmup-2">Warm-up</button>
+          <button type="button" class="ops-btn" id="btn-ao-goto-logs-2">Logs</button>
+        </div>
+        <div class="ops-info">Full provider log search lives on the <b>Logs</b> page. SendGrid API sync remains in the secondary panel below when SendGrid mode is active.</div>
+      </div>
     </div>
-
-    <h4 style="margin:16px 0 8px">8. Searchable provider logs</h4>
-    <div class="hint" style="margin:0 0 8px">Searches <code>data/kumomta.log</code> / <code>data/sendgrid.log</code> only — not a cross-provider message DB.</div>
-    <div class="ra-filters" style="flex-wrap:wrap;gap:8px">
+    <div class="ops-toast" id="ao-msg"></div>
+    <!-- Legacy nodes kept for residual JS references -->
+    <div style="display:none" aria-hidden="true">
       <select id="ao-log-source"><option value="kumomta">KumoMTA log</option><option value="sendgrid">SendGrid log</option></select>
-      <input type="search" id="ao-log-q" placeholder="Filter text…" style="min-width:180px">
-      <button type="button" class="sd-btn" id="btn-ao-logs">Search logs</button>
+      <input type="search" id="ao-log-q" value="">
+      <button type="button" id="btn-ao-logs">Search logs</button>
+      <table><tbody id="ao-logs"></tbody></table>
+      <table><tbody id="ao-compare"></tbody></table>
     </div>
-    <div class="ra-table-wrap" style="margin-top:8px;max-height:260px;overflow:auto">
-      <table class="ra-table">
-        <thead><tr><th>Line</th></tr></thead>
-        <tbody id="ao-logs"><tr><td style="color:#8b9bb0">No log query yet.</td></tr></tbody>
-      </table>
-    </div>
-
-    <h4 style="margin:16px 0 8px">10. Local throughput (Kumo warm-up)</h4>
-    <div id="ao-throughput" class="sd-note">Loading…</div>
-    <div class="sd-msg" id="ao-msg"></div>
   </section>
 
   <section class="setup-card mode-only-sendgrid" style="<?php if($smtp_mode!=='sendgrid') echo 'display:none'; ?>">
-    <h3>SendGrid analytics (API sync)</h3>
+    <h3>SendGrid analytics (API sync) — secondary</h3>
     <div class="sd-note" style="margin-bottom:12px">
       Data is pulled locally via SendGrid REST APIs into <code>data/sendgrid_analytics.sqlite</code>.
       <b>No Event Webhook</b>, no public URL, no ngrok. Sync is <b>on-demand polling</b> — not real-time.
@@ -2289,7 +2715,7 @@ document.addEventListener('DOMContentLoaded', function(){
       </table>
     </div>
     <div class="sd-msg" id="supp-msg"></div>
-    <div class="hint" style="margin-top:8px">Kumo marketing sends include <code>List-Unsubscribe</code> when configured. Set <code>UNSUBSCRIBE_BASE_URL</code> + <code>UNSUBSCRIBE_SECRET</code> in <code>.env</code> for one-click links.</div>
+    <div class="hint" style="margin-top:8px">Production one-click uses the Hostinger service (<code>UNSUB_SERVICE_ENABLED</code> + <code>UNSUB_SERVICE_BASE_URL</code> + API keys). Deploy <code>unsub-service/</code> first. Local HMAC <code>unsubscribe.php</code> is legacy/dev only.</div>
   </section>
   </div>
 
@@ -2354,50 +2780,151 @@ document.addEventListener('DOMContentLoaded', function(){
   </section>
   </div>
 
-  <div class="nav-page" id="page-warmup">
-  <section class="setup-card" id="warmup-card">
-    <h3>KumoMTA warm-up</h3>
-    <div class="hint" style="margin:0 0 10px">Governor applies to <b>campaign</b> Kumo sends only (test list skips caps). Caps never auto-increase — pending increases need Approve. Bad metrics → cooldown with a stored reason. See <code>docs/WARMUP.md</code>.</div>
-    <div id="warmup-status-box" class="sd-note">Loading warm-up status…</div>
-    <div class="hint" style="margin:0 0 10px"><b>Default:</b> PAUSED · hourly <b>20</b> attempts / rolling 60 min · pace ≈ <b>180s</b> (1 / 3 min). Resume only when ready. Accepted ≠ Delivered.</div>
-    <div class="sd-overview" style="grid-template-columns:repeat(4,1fr);margin:12px 0">
-      <div class="sd-kpi"><b id="wu-daily-left">—</b><span>Daily left</span></div>
-      <div class="sd-kpi"><b id="wu-hourly-left">—</b><span>Hourly left (60m)</span></div>
-      <div class="sd-kpi"><b id="wu-accepted">—</b><span>Accepted today</span></div>
-      <div class="sd-kpi fail"><b id="wu-state">—</b><span>State</span></div>
+  <div class="nav-page" id="page-logs">
+  <section class="ops-dash" id="logs-card">
+    <div class="ops-label">Logs</div>
+    <h3 class="ops-title">Event stream</h3>
+    <p class="ops-lead">Read-only viewer over <b>persistent</b> sources only. Live Compose <code>dash_log</code> lines are ephemeral and are <b>not</b> stored here. Secrets are redacted on the server before display.</p>
+    <div class="ops-filters">
+      <select id="logs-source" title="Source">
+        <option value="all">All sources</option>
+        <option value="kumomta">KumoMTA</option>
+        <option value="sendgrid">SendGrid</option>
+        <option value="warmup">Warm-up decisions</option>
+        <option value="warmup_events">Warm-up events</option>
+        <option value="campaign">Campaign</option>
+      </select>
+      <select id="logs-severity" title="Severity">
+        <option value="all">All severities</option>
+        <option value="info">Info</option>
+        <option value="warn">Warn</option>
+        <option value="error">Error</option>
+      </select>
+      <select id="logs-country" title="Country (best-effort)">
+        <option value="">Country (any)</option>
+      </select>
+      <input type="search" id="logs-q" placeholder="Search…" style="min-width:160px">
+      <button type="button" class="ops-btn primary" id="btn-logs-refresh">Refresh</button>
     </div>
-    <div class="sd-overview" style="grid-template-columns:repeat(4,1fr);margin:0 0 12px">
-      <div class="sd-kpi"><b id="wu-sent">—</b><span>Attempts today</span></div>
-      <div class="sd-kpi fail"><b id="wu-bounced">—</b><span>Bounced today</span></div>
-      <div class="sd-kpi fail"><b id="wu-failed">—</b><span>Failed today</span></div>
-      <div class="sd-kpi info"><b id="wu-rate">—</b><span>Target / hour</span></div>
-    </div>
-    <div id="wu-pace-box" class="sd-note">Next send / pacing: —</div>
-    <div id="wu-queue-box" class="sd-note" style="margin-top:8px">Queue: —</div>
-    <div class="ra-filters" style="flex-wrap:wrap;gap:8px">
-      <label>Daily cap <input type="number" id="wu-daily-cap" min="1" style="width:90px"></label>
-      <label>Hourly cap <input type="number" id="wu-hourly-cap" min="1" style="width:90px" title="Rolling 60-minute attempt limit"></label>
-      <button type="button" class="sd-btn" id="btn-wu-save-caps">Save / request increase</button>
-      <button type="button" class="sd-btn" id="btn-wu-refresh">Refresh</button>
-    </div>
-    <div class="ra-filters" style="margin-top:8px;flex-wrap:wrap;gap:8px">
-      <button type="button" class="sd-btn" id="btn-wu-active">Resume active</button>
-      <button type="button" class="sd-btn" id="btn-wu-pause">Pause</button>
-      <button type="button" class="sd-btn" id="btn-wu-hold">Hold</button>
-      <button type="button" class="sd-btn" id="btn-wu-stop">Stop plan</button>
-      <button type="button" class="sd-btn" id="btn-wu-emerg" style="background:#c0392b;color:#fff">Emergency stop</button>
-      <button type="button" class="sd-btn" id="btn-wu-clear-emerg">Clear stop flag</button>
-    </div>
-    <div class="hint" style="margin-top:10px"><b>Pending increases</b></div>
-    <div id="wu-pending" class="sd-note">None</div>
-    <div class="hint" style="margin-top:10px"><b>Decisions log</b></div>
-    <div class="ra-table-wrap">
-      <table class="ra-table">
-        <thead><tr><th>When</th><th>Action</th><th>Reason</th><th>Actor</th></tr></thead>
-        <tbody id="wu-decisions"><tr><td colspan="4" style="color:#8b9bb0">Loading…</td></tr></tbody>
+    <div id="logs-note" class="ops-info">Loading…</div>
+    <div class="ops-table-wrap" style="max-height:520px">
+      <table class="ops-table" id="logs-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Severity</th>
+            <th>Source</th>
+            <th>Type</th>
+            <th>Country</th>
+            <th>Mailer</th>
+            <th>Server</th>
+            <th>Campaign</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="logs-body">
+          <tr><td colspan="9" class="ops-empty">Loading…</td></tr>
+        </tbody>
       </table>
     </div>
-    <div class="sd-msg" id="wu-msg"></div>
+    <div class="ops-pager">
+      <span id="logs-page-lbl">Page 1</span>
+      <div class="ops-actions" style="margin:0">
+        <button type="button" class="ops-btn" id="btn-logs-prev">Prev</button>
+        <button type="button" class="ops-btn" id="btn-logs-next">Next</button>
+      </div>
+    </div>
+    <div class="ops-toast" id="logs-msg"></div>
+  </section>
+  </div>
+
+  <div class="nav-page" id="page-warmup">
+  <section class="ops-dash" id="warmup-card">
+    <div class="ops-label">Warm-up</div>
+    <h3 class="ops-title">Capacity control</h3>
+    <p class="ops-lead">Governor runs in the <b>Desktop app</b> before each campaign KumoMTA submission — it is <b>not</b> a VPS/KumoMTA config limit. Test list sends skip caps. Accepted ≠ Delivered. There is <b>no automatic increase schedule</b>; daily raises need manual approval when enabled.</p>
+
+    <div class="ops-status-row" id="wu-status-chips">
+      <span class="ops-chip" id="wu-chip-state"><i></i> State —</span>
+      <span class="ops-chip" id="wu-chip-gov"><i></i> Governor —</span>
+      <span class="ops-chip" id="wu-chip-emerg"><i></i> Emergency —</span>
+      <span class="ops-chip" id="wu-chip-manual"><i></i> Manual approval —</span>
+    </div>
+
+    <div class="ops-kpis">
+      <div class="ops-kpi"><b id="wu-daily-left">—</b><span>Daily remaining</span><em id="wu-daily-cap-lbl">cap —</em></div>
+      <div class="ops-kpi"><b id="wu-hourly-left">—</b><span>Hourly left (60m)</span><em id="wu-hourly-cap-lbl">configured —</em></div>
+      <div class="ops-kpi"><b id="wu-accepted">—</b><span>Accepted today</span></div>
+      <div class="ops-kpi" id="wu-kpi-state"><b id="wu-state">—</b><span>Warm-up state</span></div>
+      <div class="ops-kpi"><b id="wu-sent">—</b><span>Attempts today</span></div>
+      <div class="ops-kpi fail"><b id="wu-bounced">—</b><span>Bounced today</span></div>
+      <div class="ops-kpi fail"><b id="wu-failed">—</b><span>Failed today</span></div>
+      <div class="ops-kpi info"><b id="wu-pace-rate">—</b><span>Pacing rate / hr</span><em id="wu-min-interval-lbl">min interval —</em></div>
+      <div class="ops-kpi ok"><b id="wu-eff-throughput">—</b><span>Effective throughput</span><em>min(hourly, pace)</em></div>
+      <div class="ops-kpi"><b id="wu-cfg-hourly">—</b><span>Configured hourly cap</span><em>rolling 60m attempts</em></div>
+    </div>
+
+    <div id="wu-pace-warn" class="ops-warn" style="display:none"></div>
+    <div id="wu-cap-warn" class="ops-warn bad" style="display:none"></div>
+    <div id="wu-metrics-warn" class="ops-warn bad" style="display:none"></div>
+
+    <div class="ops-grid">
+      <div class="ops-panel">
+        <h4>Usage</h4>
+        <div class="ops-bar-wrap">
+          <div class="ops-bar-meta"><span>Daily accepted</span><span id="wu-daily-bar-lbl">—</span></div>
+          <div class="ops-bar" id="wu-daily-bar"><i id="wu-daily-bar-fill" style="width:0%"></i></div>
+        </div>
+        <div class="ops-bar-wrap">
+          <div class="ops-bar-meta"><span>Rolling 60m attempts</span><span id="wu-hourly-bar-lbl">—</span></div>
+          <div class="ops-bar" id="wu-hourly-bar"><i id="wu-hourly-bar-fill" style="width:0%"></i></div>
+        </div>
+        <div class="ops-info" id="wu-pace-box">Next send / pacing: —</div>
+        <div class="ops-info" id="wu-queue-box">Queue: —</div>
+        <div class="ops-info">No automatic schedule — daily increases are requested and approved manually.</div>
+      </div>
+      <div class="ops-panel">
+        <h4>Capacity controls</h4>
+        <div class="ops-field">
+          <label for="wu-daily-cap">Daily cap (accepted)</label>
+          <input type="number" id="wu-daily-cap" min="1" style="width:100%;background:#121212;border:1px solid #27272a;color:#fff;border-radius:6px;padding:8px 10px">
+        </div>
+        <div class="ops-field">
+          <label for="wu-hourly-cap">Hourly cap (rolling 60m attempts)</label>
+          <input type="number" id="wu-hourly-cap" min="1" style="width:100%;background:#121212;border:1px solid #27272a;color:#fff;border-radius:6px;padding:8px 10px">
+        </div>
+        <div class="ops-info" id="wu-readonly-pace">Min interval (read-only from config): —</div>
+        <div class="ops-actions">
+          <button type="button" class="ops-btn primary" id="btn-wu-apply-hourly" title="Applies hourly only; does not raise daily">Apply hourly</button>
+          <button type="button" class="ops-btn" id="btn-wu-request-daily" title="Raises daily (and may pend hourly with it when approval is required)">Request daily increase</button>
+          <button type="button" class="ops-btn" id="btn-wu-save-caps" title="Legacy combined save">Save both</button>
+          <button type="button" class="ops-btn" id="btn-wu-refresh">Refresh</button>
+        </div>
+        <div class="ops-info">Apply hourly changes the rolling attempt limit only. Request daily increase uses the existing approval workflow when manual approval is on. Save both sends both values together (same backend rules as before).</div>
+      </div>
+    </div>
+
+    <div class="ops-sec">Plan state</div>
+    <div class="ops-actions">
+      <button type="button" class="ops-btn primary" id="btn-wu-active">Resume active</button>
+      <button type="button" class="ops-btn" id="btn-wu-pause">Pause</button>
+      <button type="button" class="ops-btn" id="btn-wu-hold">Hold</button>
+      <button type="button" class="ops-btn" id="btn-wu-stop">Stop plan</button>
+      <button type="button" class="ops-btn danger" id="btn-wu-emerg">Emergency stop</button>
+      <button type="button" class="ops-btn" id="btn-wu-clear-emerg">Clear stop flag</button>
+    </div>
+
+    <div class="ops-sec">Pending increase requests</div>
+    <div id="wu-pending" class="ops-info">None</div>
+
+    <div class="ops-sec">Approval / decisions history</div>
+    <div class="ops-table-wrap">
+      <table class="ops-table">
+        <thead><tr><th>When</th><th>Action</th><th>Reason</th><th>Actor</th></tr></thead>
+        <tbody id="wu-decisions"><tr><td colspan="4" style="color:#767d88">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="ops-toast" id="wu-msg"></div>
   </section>
   </div>
 
@@ -10636,6 +11163,38 @@ function campaign_parallel_master($emails, $cfg, $numWorkers)
 			die();
 		}
 		$to = preg_replace('/\s+/', '', $allemails[$x - 1]);
+		// Suppression / unsub gate BEFORE warm-up reservation so excluded addresses do not burn hourly attempt slots
+		if(function_exists('suppression_sync_allow_marketing') && !$isTestSend)
+		{
+			$syncGate = suppression_sync_allow_marketing();
+			if(empty($syncGate['ok']))
+			{
+				$left = count($pendingAll) - count($sessionOk);
+				mail_queue_save_progress(array(
+					'phase' => 'unsub_sync_halt',
+					'session_ok' => count($sessionOk),
+					'pending_left' => $left,
+					'reason' => isset($syncGate['err']) ? $syncGate['err'] : 'unsub sync fail-closed'
+				));
+				dash_log('warn', 'UNSUB SYNC HALT — '.(isset($syncGate['err']) ? $syncGate['err'] : 'fail-closed').' · OK this run: '.count($sessionOk).' · pending left: '.$left);
+				dash_js("dashDone('Unsub sync halt');");
+				send_mark_stopped();
+				die();
+			}
+		}
+		if(function_exists('suppression_blocked_send_result'))
+		{
+			$preBlock = suppression_blocked_send_result($to, array('lane' => 'kumomta'));
+			if(is_array($preBlock))
+			{
+				$lastErr = isset($preBlock['err']) ? $preBlock['err'] : 'suppressed';
+				dash_log('warn', 'EXCLUDED '.$to.' — '.$lastErr.' (pre-warmup; marked done — will not retry)');
+				dash_js('dashFail();');
+				if(!$isTestSend) mail_queue_mark_done($to);
+				if(!$isTestSend && function_exists('warmup_record_outcome')) warmup_record_outcome('kumomta', $to, 'excluded');
+				continue;
+			}
+		}
 		if(!$isTestSend && function_exists('warmup_allow_send'))
 		{
 			$wu = warmup_allow_send('kumomta', $to);
