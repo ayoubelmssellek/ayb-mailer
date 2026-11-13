@@ -1159,10 +1159,126 @@ document.addEventListener('DOMContentLoaded', function(){
   function aoGoto(name){ if(typeof showPage==='function') showPage(name); else if(typeof window.showAppPage==='function') window.showAppPage(name); }
   ['btn-ao-goto-warmup','btn-ao-goto-warmup-2'].forEach(function(id){ var b=document.getElementById(id); if(b) b.onclick=function(){ aoGoto('warmup'); }; });
   ['btn-ao-goto-logs','btn-ao-goto-logs-2'].forEach(function(id){ var b=document.getElementById(id); if(b) b.onclick=function(){ aoGoto('logs'); }; });
-  var aoDays=document.getElementById('ao-days'); if(aoDays) aoDays.onchange=function(){ window.loadAnalyticsOverview(); };
+  var aoDays=document.getElementById('ao-days'); if(aoDays) aoDays.onchange=function(){ window.loadAnalyticsOverview(); var rd=document.getElementById('rd-days'); if(rd){ rd.value=aoDays.value; if(typeof window.loadRemoteDelivery==='function') window.loadRemoteDelivery(); } };
   var aoCountry=document.getElementById('ao-country'); if(aoCountry) aoCountry.onchange=function(){ window.loadAnalyticsOverview(); };
   var aoMethod=document.getElementById('ao-method'); if(aoMethod) aoMethod.onchange=aoApplyMethodFilter;
   if(document.getElementById('analytics-overview-card')) window.loadAnalyticsOverview();
+
+  // —— Remote Delivery Analytics (KumoMTA Delivery/Bounce/… — not submission accept) ——
+  function rdEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function rdSet(id,v){ var el=document.getElementById(id); if(el) el.textContent=(v==null||v==='')?'—':String(v); }
+  window.loadRemoteDelivery=function(){
+    var daysEl=document.getElementById('rd-days');
+    var days=daysEl?daysEl.value:7;
+    var msg=document.getElementById('rd-msg');
+    var st=document.getElementById('rd-status');
+    var wait=document.getElementById('rd-waiting');
+    if(msg){ msg.className='ops-toast'; msg.textContent='Loading remote delivery…'; }
+    fetch('remote_delivery_api.php?action=overview&days='+encodeURIComponent(days),{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){
+        if(msg){ msg.className='ops-toast fail'; msg.textContent='Remote delivery overview failed'; }
+        if(st) st.textContent='Unable to load remote delivery analytics.';
+        return;
+      }
+      var waiting=!!d.waiting_for_events;
+      if(wait){
+        wait.style.display=waiting?'block':'none';
+        wait.textContent=d.empty_message||'Waiting for KumoMTA delivery events';
+      }
+      if(st){
+        st.textContent=(d.ingest_note||'')+(d.last_ingest_at?(' · Last ingest '+d.last_ingest_at):'');
+      }
+      var vocab=document.getElementById('rd-vocab');
+      if(vocab){
+        var v=d.vocabulary||{};
+        vocab.style.display='block';
+        vocab.innerHTML='<b>Remote Accepted</b>: '+rdEsc(v.remote_accepted||'')+' · <b>Rate</b>: '+rdEsc(v.acceptance_rate||'');
+      }
+      var k=d.kpis||{};
+      if(waiting){
+        rdSet('rd-kpi-accepted','—');
+        rdSet('rd-kpi-bounce','—');
+        rdSet('rd-kpi-deferred','—');
+        rdSet('rd-kpi-expired','—');
+        rdSet('rd-kpi-rate','—');
+      } else {
+        rdSet('rd-kpi-accepted', k.remote_accepted);
+        rdSet('rd-kpi-bounce', k.permanent_bounces);
+        rdSet('rd-kpi-deferred', k.deferred);
+        rdSet('rd-kpi-expired', k.expired);
+        rdSet('rd-kpi-rate', k.remote_acceptance_rate==null?'Unavailable':(k.remote_acceptance_rate+'%'));
+      }
+      var spark=document.getElementById('rd-spark');
+      var series=d.series||[];
+      if(spark){
+        if(!series.length){
+          spark.innerHTML='<div class="ops-empty" style="padding:12px 0">'+(waiting?'Waiting for KumoMTA delivery events':'No series in range')+'</div>';
+        } else {
+          var max=1;
+          for(var i=0;i<series.length;i++){
+            var tot=(Number(series[i].Delivery)||0)+(Number(series[i].Bounce)||0)+(Number(series[i].TransientFailure)||0)+(Number(series[i].Expiration)||0);
+            if(tot>max) max=tot;
+          }
+          spark.innerHTML=series.map(function(day){
+            var a=Number(day.Delivery)||0;
+            var h=Math.max(4, Math.round((a/max)*64));
+            return '<i title="'+rdEsc(day.day)+' accepted '+a+'" style="height:'+h+'px"></i>';
+          }).join('');
+        }
+      }
+      var buckets=(d.smtp_codes&&d.smtp_codes.buckets)?d.smtp_codes.buckets:{};
+      if(waiting){
+        rdSet('rd-code-2xx','—'); rdSet('rd-code-4xx','—'); rdSet('rd-code-5xx','—'); rdSet('rd-code-other','—');
+      } else {
+        rdSet('rd-code-2xx', buckets['2xx']!=null?buckets['2xx']:0);
+        rdSet('rd-code-4xx', buckets['4xx']!=null?buckets['4xx']:0);
+        rdSet('rd-code-5xx', buckets['5xx']!=null?buckets['5xx']:0);
+        var unk=(Number(buckets.other)||0)+(Number(buckets.unknown)||0);
+        rdSet('rd-code-other', unk);
+      }
+      var mxBody=document.getElementById('rd-mx-body');
+      if(mxBody){
+        var mx=d.mx||[];
+        if(!mx.length) mxBody.innerHTML='<tr><td colspan="5" style="color:#767d88">'+(waiting?'Waiting for KumoMTA delivery events':'No MX rows')+'</td></tr>';
+        else mxBody.innerHTML=mx.map(function(r){
+          var rate=r.acceptance_rate==null?'—':(r.acceptance_rate+'%');
+          return '<tr><td>'+rdEsc(r.mx)+'</td><td>'+rdEsc(r.accepted)+'</td><td>'+rdEsc(r.bounce)+'</td><td>'+rdEsc(r.deferred)+'</td><td>'+rdEsc(rate)+'</td></tr>';
+        }).join('');
+      }
+      var failBody=document.getElementById('rd-fail-body');
+      if(failBody){
+        var fails=d.failures||[];
+        if(!fails.length) failBody.innerHTML='<tr><td colspan="4" style="color:#767d88">'+(waiting?'Waiting for KumoMTA delivery events':'No failures in range')+'</td></tr>';
+        else failBody.innerHTML=fails.map(function(r){
+          return '<tr><td>'+rdEsc(r.smtp_code==null?'—':r.smtp_code)+'</td><td>'+rdEsc(r.enhanced_code)+'</td><td>'+rdEsc(r.response_text)+'</td><td>'+rdEsc(r.count)+'</td></tr>';
+        }).join('');
+      }
+      var recentBody=document.getElementById('rd-recent-body');
+      if(recentBody){
+        var recent=(d.recent&&d.recent.rows)?d.recent.rows:[];
+        if(!recent.length) recentBody.innerHTML='<tr><td colspan="8" style="color:#767d88">'+(waiting?'Waiting for KumoMTA delivery events':'No events')+'</td></tr>';
+        else recentBody.innerHTML=recent.map(function(r){
+          return '<tr class="expandable" title="spool '+rdEsc(r.spool_id||'')+'">'
+            +'<td>'+rdEsc(r.ts)+'</td>'
+            +'<td>'+rdEsc(r.recipient_masked)+'</td>'
+            +'<td>'+rdEsc(r.event_type)+'</td>'
+            +'<td>'+rdEsc(r.remote_peer)+'</td>'
+            +'<td>'+rdEsc(r.smtp_code==null?'—':r.smtp_code)+'</td>'
+            +'<td>'+rdEsc(r.enhanced_code)+'</td>'
+            +'<td>'+rdEsc(r.response_text)+'</td>'
+            +'<td>'+rdEsc(r.num_attempts)+'</td></tr>';
+        }).join('');
+      }
+      if(msg){ msg.className='ops-toast ok'; msg.textContent=waiting?'Remote delivery store empty — waiting for KumoMTA events':'Remote delivery updated'; }
+    }).catch(function(){
+      if(msg){ msg.className='ops-toast fail'; msg.textContent='Remote delivery request failed'; }
+    });
+  };
+  var btnRd=document.getElementById('btn-rd-refresh');
+  if(btnRd) btnRd.onclick=function(){ window.loadRemoteDelivery(); };
+  var rdDays=document.getElementById('rd-days');
+  if(rdDays) rdDays.onchange=function(){ window.loadRemoteDelivery(); };
+  if(document.getElementById('remote-delivery-card')) window.loadRemoteDelivery();
 
   // —— SendGridMail multi-country delivered export ——
   window.__sgmPage=1;
@@ -1924,6 +2040,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var side=document.getElementById('app-sidebar');
     if(side) side.classList.remove('open');
     if(name==='analytics' && typeof window.loadAnalyticsOverview==='function') window.loadAnalyticsOverview();
+    if(name==='analytics' && typeof window.loadRemoteDelivery==='function') window.loadRemoteDelivery();
     if(name==='sendgridmail' && typeof window.loadSendGridMail==='function') window.loadSendGridMail();
     if(name==='warmup' && typeof loadWarmup==='function') loadWarmup();
     if(name==='logs' && typeof window.loadDashboardLogs==='function') window.loadDashboardLogs();
@@ -2581,6 +2698,79 @@ document.addEventListener('DOMContentLoaded', function(){
       <table><tbody id="ao-logs"></tbody></table>
       <table><tbody id="ao-compare"></tbody></table>
     </div>
+  </section>
+
+  <section class="ops-dash" id="remote-delivery-card" data-ao-method="kumomta">
+    <div class="ops-label">KumoMTA · Remote MX</div>
+    <h3 class="ops-title">Remote Delivery Analytics</h3>
+    <p class="ops-lead"><b>Remote Accepted</b> means a recipient mail server accepted the message (KumoMTA <code>Delivery</code>) — <b>not</b> inbox placement, and <b>not</b> the same as Desktop “Kumo Accepted” (submission to Kumo). Data arrives only after the Ubuntu VPS webhook is configured.</p>
+    <div class="ops-filters">
+      <select id="rd-days" title="Date range">
+        <option value="1">1 day</option>
+        <option value="7" selected>7 days</option>
+        <option value="30">30 days</option>
+      </select>
+      <button type="button" class="ops-btn primary" id="btn-rd-refresh">Refresh</button>
+    </div>
+    <div id="rd-status" class="ops-info">Loading remote delivery status…</div>
+    <div id="rd-waiting" class="ops-warn" style="display:none">Waiting for KumoMTA delivery events</div>
+    <div id="rd-vocab" class="ops-info" style="display:none"></div>
+
+    <div class="ops-sec">Remote delivery KPIs</div>
+    <div class="ops-kpis" id="rd-kpi-row">
+      <div class="ops-kpi ok"><b id="rd-kpi-accepted">—</b><span>Remote Accepted</span><em>remote MX · not inbox</em></div>
+      <div class="ops-kpi fail"><b id="rd-kpi-bounce">—</b><span>Permanent Bounces</span></div>
+      <div class="ops-kpi warn"><b id="rd-kpi-deferred">—</b><span>Deferred</span><em>TransientFailure</em></div>
+      <div class="ops-kpi"><b id="rd-kpi-expired">—</b><span>Expired</span></div>
+      <div class="ops-kpi info"><b id="rd-kpi-rate">—</b><span>Remote Acceptance Rate</span><em>Delivery ÷ (D+B+E)</em></div>
+    </div>
+
+    <div class="ops-grid">
+      <div class="ops-panel">
+        <h4>Remote delivery trend</h4>
+        <div class="ops-spark" id="rd-spark" aria-hidden="true"></div>
+        <div id="rd-series-legend" class="ops-info">Accepted / Bounce / Deferred / Expired by day</div>
+      </div>
+      <div class="ops-panel">
+        <h4>SMTP response codes</h4>
+        <div class="ops-kpis" style="grid-template-columns:repeat(2,1fr);margin:0" id="rd-code-buckets">
+          <div class="ops-kpi ok"><b id="rd-code-2xx">—</b><span>2xx</span></div>
+          <div class="ops-kpi warn"><b id="rd-code-4xx">—</b><span>4xx</span></div>
+          <div class="ops-kpi fail"><b id="rd-code-5xx">—</b><span>5xx</span></div>
+          <div class="ops-kpi mute"><b id="rd-code-other">—</b><span>Other / Unknown</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ops-sec">Remote MX performance</div>
+    <div class="ops-table-wrap">
+      <table class="ops-table">
+        <thead><tr><th>Remote MX / peer</th><th>Accepted</th><th>Bounce</th><th>Deferred</th><th>Rate</th></tr></thead>
+        <tbody id="rd-mx-body"><tr><td colspan="5" style="color:#767d88">—</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="ops-sec">Failure analysis</div>
+    <div class="ops-table-wrap">
+      <table class="ops-table">
+        <thead><tr><th>SMTP code</th><th>Enhanced</th><th>Response text</th><th>Count</th></tr></thead>
+        <tbody id="rd-fail-body"><tr><td colspan="4" style="color:#767d88">—</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="ops-sec">Recent delivery events</div>
+    <div class="ops-table-wrap" style="max-height:360px">
+      <table class="ops-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th><th>Recipient</th><th>Type</th><th>Remote MX</th>
+            <th>SMTP</th><th>Enhanced</th><th>Response</th><th>Attempts</th>
+          </tr>
+        </thead>
+        <tbody id="rd-recent-body"><tr><td colspan="8" style="color:#767d88">—</td></tr></tbody>
+      </table>
+    </div>
+    <div class="ops-toast" id="rd-msg"></div>
   </section>
 
   <section class="setup-card mode-only-sendgrid" style="<?php if($smtp_mode!=='sendgrid') echo 'display:none'; ?>">

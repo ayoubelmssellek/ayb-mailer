@@ -51,6 +51,8 @@
 /data/unsub_sync_meta.json
 /data/warmup.sqlite
 /data/warmup.sqlite-*
+/data/remote_delivery.sqlite
+/data/remote_delivery.sqlite-*
 /exclude_*.txt
 /unsub-service/config.php
 
